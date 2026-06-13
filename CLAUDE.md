@@ -4,7 +4,12 @@
 
 ## 项目：Project Launcher（项目快速启动工具）
 
-一款轻量级 Windows 桌面工具（Python 3.10+ / Tkinter），用于集中管理和快速启动分散在磁盘各处的开发项目。双击项目条目即可在 IDE 中打开。
+一款轻量级 Windows 桌面工具（Python 3.10+ / Tkinter），用于集中管理和快速启动分散在磁盘各处的开发项目。
+
+**交互模型：**
+- **双击项目条目** → 进入项目目录浏览，展示内部文件结构
+- **右键项目条目** → 弹出菜单：① 启动程序（文件资源管理器打开） ② 使用绑定 IDE 打开项目
+- **📁 新建文件夹按钮** → 在任意路径创建文件夹
 
 **平台：** 仅限 Windows 10/11 — 使用了 `ctypes` Win32 API 调用（互斥体、DPI、窗口激活）。
 
@@ -22,7 +27,7 @@ project_launcher/
 ├── ui/
 │   ├── __init__.py
 │   ├── main_window.py       # 主窗口 — 工具栏、可滚动项目列表、状态栏、搜索
-│   ├── widgets.py            # 可复用组件 — SearchEntry（防抖）、ProjectItemFrame（悬停/启动/右键菜单）
+│   ├── widgets.py            # 可复用组件 — SearchEntry（防抖）、ProjectItemFrame（悬停/右键菜单）、DirectoryEntryFrame（目录浏览条目）
 │   └── settings_dialog.py   # 模态设置对话框 — 基础目录、IDE 选择、排除目录、排序开关
 ├── build.bat                # PyInstaller 构建脚本 → 生成 dist/ProjectLauncher.exe
 ├── ProjectLauncher.spec     # PyInstaller 规格文件（--onefile、--windowed、tkinter 隐式导入）
@@ -56,6 +61,12 @@ config.json ──► config.py (加载) ──► App.__init__ ──► MainWi
 5. **搜索防抖**（`ui/widgets.py:54-63`）：`SearchEntry` 通过 `tk.after` 对按键进行 150ms 防抖处理。导航键（方向键、Tab 等）跳过防抖。
 
 6. **DPI 感知**（`ui/main_window.py:81-97`）：在 Windows 10 1703+ 上调用 `SetProcessDpiAwareness(2)`（逐显示器 V2），并为旧版本提供回退方案。
+
+7. **目录浏览视图**（`ui/main_window.py:487-607`）：双击项目条目进入目录浏览模式。通过 `_view_mode` 状态（`'projects'` / `'directory'`）切换项目列表与目录内容视图。`_browse_history`（栈）记录导航路径，支持多级子目录进入与 `← 返回`。`DirectoryEntryFrame`（`ui/widgets.py:257-338`）渲染条目：文件夹（📁）可双击进入，文件（📄）仅展示。超过 500 个条目时限截以防水 UI 冻结。
+
+8. **右键菜单重构**（`ui/widgets.py:237-247`）：右键项目条目弹出两选项菜单 — "🚀 启动程序"（调用 `os.startfile` 在文件资源管理器打开）和 "💻 使用绑定 IDE 打开项目"（承接原双击 IDE 启动功能）。原双击行为改为目录浏览（见条目 7）。
+
+9. **新建文件夹对话框**（`ui/main_window.py:609-687`）：工具栏 `📁 新建文件夹` 按钮触发模态 `Toplevel` 对话框，支持手动输入路径或"浏览..."（`filedialog.askdirectory`）选择父文件夹。通过 `os.makedirs(path, exist_ok=True)` 创建。若新文件夹路径在基础目录内，创建成功后自动刷新项目列表。
 
 ### 冻结构建（PyInstaller）
 - `main.py` 检查 `sys.frozen` — 将 stderr 重定向到 `%TEMP%/ProjectLauncher/error.log`（`--windowed` 模式下无控制台窗口）
