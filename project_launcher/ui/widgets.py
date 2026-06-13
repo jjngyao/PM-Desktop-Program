@@ -87,10 +87,11 @@ class ProjectItemFrame(ttk.Frame):
     COLOR_HOVER = '#e8e8e8'     # light hover background
     COLOR_BG = '#ffffff'        # normal background
 
-    def __init__(self, parent, project: ProjectInfo, on_launch=None, **kwargs):
+    def __init__(self, parent, project: ProjectInfo, on_enter=None, on_launch_ide=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.project = project
-        self.on_launch = on_launch
+        self.on_enter = on_enter
+        self.on_launch_ide = on_launch_ide
         self._hovering = False
 
         self.configure(style='Project.TFrame', cursor='hand2')
@@ -230,23 +231,18 @@ class ProjectItemFrame(ttk.Frame):
                 yield child
 
     def _on_double_click(self, event):
-        if self.on_launch:
-            self.on_launch(self.project)
+        if self.on_enter:
+            self.on_enter(self.project)
 
     def _on_right_click(self, event):
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(
-            label='📂 在文件资源管理器中打开',
+            label='🚀 启动程序',
             command=lambda: self._launch_explorer()
         )
         menu.add_command(
-            label='📋 复制路径',
-            command=lambda: self.clipboard_append(self.project.path)
-        )
-        menu.add_separator()
-        menu.add_command(
-            label='📋 复制名称',
-            command=lambda: self.clipboard_append(self.project.name)
+            label='💻 使用绑定 IDE 打开项目',
+            command=lambda: self.on_launch_ide(self.project) if self.on_launch_ide else None
         )
         menu.tk_popup(event.x_root, event.y_root)
 
@@ -256,6 +252,89 @@ class ProjectItemFrame(ttk.Frame):
             os.startfile(self.project.path)
         except OSError:
             pass
+
+
+# ── Directory Entry Frame ────────────────────────────────────────────────────
+
+class DirectoryEntryFrame(ttk.Frame):
+    """A single entry in the directory browser view. Supports double-click to
+    navigate into subdirectories."""
+
+    COLOR_DIR = '#58a6ff'
+    COLOR_HOVER = '#e8e8e8'
+    COLOR_BG = '#ffffff'
+
+    def __init__(self, parent, name: str, path: str, is_dir: bool = False,
+                 on_click=None, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.entry_name = name
+        self.entry_path = path
+        self.is_dir = is_dir
+        self.on_click = on_click
+        self._hovering = False
+
+        self.configure(style='Project.TFrame',
+                       cursor='hand2' if is_dir else 'arrow')
+
+        # Icon
+        icon = '📁' if is_dir else '📄'
+        self.icon_label = tk.Label(
+            self,
+            text=icon,
+            font=('Segoe UI', 14),
+            bg=self.COLOR_BG,
+        )
+        self.icon_label.pack(side=tk.LEFT, padx=(12, 8), pady=6)
+
+        # Name
+        self.name_label = tk.Label(
+            self,
+            text=name,
+            font=('Segoe UI', 11),
+            fg='#1e1e1e',
+            bg=self.COLOR_BG,
+            anchor='w',
+        )
+        self.name_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=6)
+
+        # Separator
+        sep = ttk.Separator(self, orient='horizontal')
+        sep.place(relx=0, rely=0.98, relwidth=1, height=1)
+
+        if is_dir:
+            self._bind_events()
+
+    def _bind_events(self):
+        """Bind hover and click events for directory entries."""
+        targets = [self, self.icon_label, self.name_label]
+        for w in targets:
+            w.bind('<Enter>', self._on_enter)
+            w.bind('<Leave>', self._on_leave)
+            w.bind('<Double-Button-1>', self._on_double_click)
+
+    def _on_enter(self, event):
+        if not self._hovering:
+            self._hovering = True
+            self.configure(style='ProjectHover.TFrame')
+            for child in (self.icon_label, self.name_label):
+                try:
+                    child.configure(bg=self.COLOR_HOVER)
+                except tk.TclError:
+                    pass
+
+    def _on_leave(self, event):
+        if self._hovering:
+            self._hovering = False
+            self.configure(style='Project.TFrame')
+            for child in (self.icon_label, self.name_label):
+                try:
+                    child.configure(bg=self.COLOR_BG)
+                except tk.TclError:
+                    pass
+
+    def _on_double_click(self, event):
+        if self.on_click:
+            self.on_click(self.entry_path)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────

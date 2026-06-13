@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional, Set
 from scanner import ProjectInfo, scan_async
 from launcher import detect_ides, find_ide_by_key, launch, IDEInfo
 from config import save_config, get_config_path
-from ui.widgets import SearchEntry, ProjectItemFrame, show_error
+from ui.widgets import SearchEntry, ProjectItemFrame, DirectoryEntryFrame, show_error
 from ui.settings_dialog import SettingsDialog
 
 
@@ -26,6 +26,11 @@ class MainWindow:
         self.projects: List[ProjectInfo] = []
         self.current_ide: Optional[IDEInfo] = None
         self.project_frames: List[ProjectItemFrame] = []
+        self._view_mode: str = 'projects'   # 'projects' or 'directory'
+        self._browsing_path: Optional[str] = None
+        self._browse_history: List[tuple] = []  # stack of (path, view_mode)
+        self._dir_frames: List[DirectoryEntryFrame] = []
+        self._nav_frame: Optional[tk.Frame] = None
         self._scan_thread = None
 
         # ── Root window ─────────────────────────────────────────────────
@@ -156,6 +161,19 @@ class MainWindow:
             command=self._open_settings,
         )
         gear_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        # New folder button
+        new_folder_btn = tk.Button(
+            toolbar,
+            text='📁 新建文件夹',
+            font=('Segoe UI', 10),
+            bg='#f0f0f0',
+            bd=0,
+            cursor='hand2',
+            activebackground='#e0e0e0',
+            command=self._on_new_folder,
+        )
+        new_folder_btn.pack(side=tk.LEFT, padx=(0, 8))
 
         # Search entry
         self.search_entry = SearchEntry(
@@ -296,6 +314,13 @@ class MainWindow:
 
     def refresh(self):
         """Re-scan the base directory and rebuild the project list."""
+        # Reset to project list view if currently browsing
+        self._hide_browse_nav()
+        self._clear_all_frames()
+        self._view_mode = 'projects'
+        self._browsing_path = None
+        self._browse_history.clear()
+
         base_dir = self.config.get('base_directory', '')
         if not base_dir:
             self._show_empty('未设置基础目录。\n点击 ⚙ 齿轮图标进行配置。')
@@ -351,10 +376,19 @@ class MainWindow:
 
     def _rebuild_list(self, filter_query: str = ''):
         """Rebuild the visible project list, optionally filtered."""
+        # Ensure we are in project list view
+        self._hide_browse_nav()
+        self._view_mode = 'projects'
+        self._browsing_path = None
+        self._browse_history.clear()
+
         # Clear existing frames
         for frame in self.project_frames:
             frame.destroy()
         self.project_frames.clear()
+        for frame in self._dir_frames:
+            frame.destroy()
+        self._dir_frames.clear()
 
         # Filter
         query = filter_query.lower().strip()
@@ -379,7 +413,8 @@ class MainWindow:
             frame = ProjectItemFrame(
                 self.list_frame,
                 project,
-                on_launch=self._on_launch_project,
+                on_enter=self._on_enter_project,
+                on_launch_ide=self._on_launch_ide,
             )
             frame.pack(fill=tk.X)
             self.project_frames.append(frame)
@@ -415,11 +450,18 @@ class MainWindow:
     # ── Actions ─────────────────────────────────────────────────────────────
 
     def _on_search(self, query: str):
-        """Handle search query changes."""
+        """Handle search query changes (project list view only)."""
+        if self._view_mode != 'projects':
+            return
         self._rebuild_list(filter_query=query)
 
-    def _on_launch_project(self, project: ProjectInfo):
-        """Handle double-click to launch a project."""
+    def _on_enter_project(self, project: ProjectInfo):
+        """Handle double-click to browse project directory contents."""
+        self._browse_history.append((None, 'projects'))
+        self._show_directory(project.path)
+
+    def _on_launch_ide(self, project: ProjectInfo):
+        """Handle 'Open with IDE' action — launch project in the bound IDE."""
         if not self.current_ide:
             self.current_ide = IDEInfo('explorer', '文件资源管理器', '')
 
@@ -441,6 +483,208 @@ class MainWindow:
         from datetime import datetime
         last_opened[project.path] = datetime.now().isoformat()
         save_config(self.config)
+
+    # ── Directory browsing ─────────────────────────────────────────────────
+
+    def _show_directory(self, path: str):
+        """Display the contents of a directory in the list area."""
+        self._view_mode = 'directory'
+        self._browsing_path = path
+
+        # Clear existing frames
+        self._clear_all_frames()
+
+        # Show navigation bar
+        self._show_browse_nav()
+
+        # List entries — directories first, then files
+        try:
+            entries = sorted(
+                os.scandir(path),
+                key=lambda e: (not e.is_dir(), e.name.lower()),
+            )
+        except (PermissionError, OSError):
+            self._show_empty('没有权限访问此目录')
+            return
+
+        entry_list = list(entries)
+        # Limit to avoid UI freeze with very large directories
+        if len(entry_list) > 500:
+            entry_list = entry_list[:500]
+
+        if not entry_list:
+            self._show_empty('此目录为空')
+            return
+
+        self._clear_empty()
+
+        for entry in entry_list:
+            try:
+                is_dir = entry.is_dir()
+            except OSError:
+                is_dir = False
+
+            frame = DirectoryEntryFrame(
+                self.list_frame,
+                entry.name,
+                entry.path,
+                is_dir=is_dir,
+                on_click=self._on_directory_entry_click,
+            )
+            frame.pack(fill=tk.X)
+            self._dir_frames.append(frame)
+
+        # Reset scroll to top
+        self.list_canvas.yview_moveto(0)
+
+    def _on_directory_entry_click(self, path: str):
+        """Handle clicking a directory entry — navigate into it."""
+        self._browse_history.append((self._browsing_path, 'directory'))
+        self._show_directory(path)
+
+    def _show_browse_nav(self):
+        """Show the directory browse navigation bar."""
+        if self._nav_frame is not None:
+            self._nav_frame.destroy()
+
+        self._nav_frame = tk.Frame(self.list_frame, bg='#f5f5f5', height=36)
+        self._nav_frame.pack(fill=tk.X)
+
+        back_btn = tk.Button(
+            self._nav_frame,
+            text='← 返回',
+            font=('Segoe UI', 10),
+            bg='#f5f5f5',
+            bd=0,
+            cursor='hand2',
+            activebackground='#e0e0e0',
+            command=self._go_back,
+        )
+        back_btn.pack(side=tk.LEFT, padx=(8, 12), pady=4)
+
+        path_label = tk.Label(
+            self._nav_frame,
+            text=self._browsing_path,
+            font=('Segoe UI', 9),
+            fg='#666666',
+            bg='#f5f5f5',
+            anchor='w',
+        )
+        path_label.pack(side=tk.LEFT, fill=tk.X, pady=4)
+
+    def _hide_browse_nav(self):
+        """Hide the directory browse navigation bar."""
+        if self._nav_frame is not None:
+            self._nav_frame.destroy()
+            self._nav_frame = None
+
+    def _go_back(self):
+        """Navigate back from directory view to the previous view."""
+        if not self._browse_history:
+            return
+
+        prev_path, prev_mode = self._browse_history.pop()
+        self._hide_browse_nav()
+        self._clear_all_frames()
+        self._clear_empty()
+
+        if prev_mode == 'projects':
+            self._view_mode = 'projects'
+            self._browsing_path = None
+            # Rebuild project list with current search query
+            query = self.search_entry.get_query()
+            self._rebuild_list(filter_query=query)
+        else:
+            self._show_directory(prev_path)
+
+    def _clear_all_frames(self):
+        """Clear all item frames (both project and directory entries)."""
+        for frame in self.project_frames:
+            frame.destroy()
+        self.project_frames.clear()
+        for frame in self._dir_frames:
+            frame.destroy()
+        self._dir_frames.clear()
+
+    # ── New folder ─────────────────────────────────────────────────────────
+
+    def _on_new_folder(self):
+        """Handle 'New Folder' button click — prompt for path and create."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title('新建文件夹')
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center on parent
+        dialog.update_idletasks()
+        pw = self.root.winfo_width()
+        ph = self.root.winfo_height()
+        px = self.root.winfo_x()
+        py = self.root.winfo_y()
+        dw, dh = 520, 120
+        x = px + (pw - dw) // 2
+        y = py + (ph - dh) // 2
+        dialog.geometry(f'{dw}x{dh}+{x}+{y}')
+
+        frame = ttk.Frame(dialog, padding=(16, 16, 16, 8))
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(
+            frame, text='请输入要创建的文件夹完整路径:',
+            font=('Segoe UI', 10),
+        ).pack(anchor='w')
+
+        entry_frame = ttk.Frame(frame)
+        entry_frame.pack(fill=tk.X, pady=(8, 12))
+
+        path_var = tk.StringVar()
+        path_entry = ttk.Entry(
+            entry_frame, textvariable=path_var, font=('Segoe UI', 10),
+        )
+        path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        def browse():
+            from tkinter import filedialog
+            result = filedialog.askdirectory(
+                parent=dialog, title='选择父文件夹',
+            )
+            if result:
+                path_var.set(result + '/')
+            path_entry.focus_set()
+
+        browse_btn = ttk.Button(entry_frame, text='浏览...', command=browse)
+        browse_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X)
+
+        def on_ok():
+            path = path_var.get().strip()
+            if not path:
+                return
+            try:
+                os.makedirs(path, exist_ok=True)
+                dialog.destroy()
+                messagebox.showinfo(
+                    '成功', f'文件夹已创建:\n{path}', parent=self.root,
+                )
+                # Refresh if inside the base directory
+                base_dir = self.config.get('base_directory', '')
+                if base_dir and path.startswith(base_dir):
+                    self.refresh()
+            except OSError as e:
+                show_error(dialog, '创建失败', f'无法创建文件夹:\n{e}')
+
+        ttk.Button(btn_frame, text='确定', command=on_ok).pack(
+            side=tk.RIGHT, padx=(8, 0),
+        )
+        ttk.Button(btn_frame, text='取消', command=dialog.destroy).pack(
+            side=tk.RIGHT,
+        )
+
+        path_entry.focus_set()
+        dialog.wait_window()
 
     def _open_settings(self):
         """Open the settings dialog."""
