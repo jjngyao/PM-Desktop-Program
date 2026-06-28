@@ -4,6 +4,7 @@ Stores settings as JSON. Prefers portable mode (config.json next to EXE),
 falls back to %APPDATA%/ProjectLauncher/config.json.
 """
 
+import copy
 import json
 import os
 import shutil
@@ -11,22 +12,15 @@ import sys
 import tempfile
 from typing import Any, Dict
 
+from constants import DEFAULT_EXCLUDED_DIRS
+
 # ── defaults ────────────────────────────────────────────────────────────────
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "base_directory": "",
     "selected_ide": "auto",
     "ide_custom_path": "",
-    "excluded_dirs": [
-        "$RECYCLE.BIN",
-        "System Volume Information",
-        "node_modules",
-        ".git",
-        "__pycache__",
-        ".idea",
-        ".venv",
-        "venv",
-    ],
+    "excluded_dirs": list(DEFAULT_EXCLUDED_DIRS),
     "window_geometry": "900x600",
     "sort_recent_first": True,
     "last_opened": {},
@@ -66,9 +60,8 @@ def _backfill(config: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure all default keys exist in the loaded config."""
     for key, default in DEFAULT_CONFIG.items():
         if key not in config:
-            config[key] = default
+            config[key] = copy.deepcopy(default)
         elif isinstance(default, dict) and isinstance(config[key], dict):
-            # shallow-merge dict defaults
             for dk, dv in default.items():
                 if dk not in config[key]:
                     config[key][dk] = dv
@@ -89,8 +82,8 @@ def load_config() -> Dict[str, Any]:
                 shutil.copy2(path, bak)
             except OSError:
                 pass
-        # Return a fresh defaults dict (not the module-level one, to avoid mutation)
-        return dict(DEFAULT_CONFIG)
+        # Return a deep copy of defaults to avoid shared mutation
+        return copy.deepcopy(DEFAULT_CONFIG)
     return _backfill(config)
 
 

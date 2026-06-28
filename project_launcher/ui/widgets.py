@@ -3,7 +3,17 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
+
 from scanner import ProjectInfo
+from constants import (
+    SEARCH_DEBOUNCE_MS,
+    COLOR_GIT_GREEN, COLOR_BLUE, COLOR_BG_HOVER, COLOR_BG_WHITE,
+    COLOR_TEXT_PRIMARY, COLOR_TEXT_TERTIARY,
+    FONT_FAMILY, FONT_SIZE_LARGE, FONT_SIZE_NORMAL, FONT_SIZE_STATUS,
+    FONT_SIZE_ICON,
+    TIME_JUST_NOW, TIME_MINUTES_AGO, TIME_HOURS_AGO,
+    TIME_YESTERDAY, TIME_DAYS_AGO, TIME_WEEKS_AGO,
+)
 
 
 # ── Search Entry ────────────────────────────────────────────────────────────
@@ -20,14 +30,13 @@ class SearchEntry(ttk.Entry):
 
         self.insert(0, placeholder)
         self._showing_placeholder = True
-        self.configure(foreground='gray')
+        self.configure(foreground="gray")
 
-        # Bindings
-        self.bind('<FocusIn>', self._on_focus_in)
-        self.bind('<FocusOut>', self._on_focus_out)
-        self.bind('<KeyRelease>', self._on_key_release)
-        self.bind('<Escape>', self._on_escape)
-        self.bind('<Control-a>', self._on_select_all)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        self.bind("<KeyRelease>", self._on_key_release)
+        self.bind("<Escape>", self._on_escape)
+        self.bind("<Control-a>", self._on_select_all)
 
     def set_callback(self, callback):
         """Set the callback(query: str) to call on search."""
@@ -36,31 +45,33 @@ class SearchEntry(ttk.Entry):
     def get_query(self) -> str:
         """Return the current search query (empty string if showing placeholder)."""
         if self._showing_placeholder:
-            return ''
+            return ""
         return self.get()
 
     def _on_focus_in(self, event):
         if self._showing_placeholder:
             self.delete(0, tk.END)
-            self.configure(foreground='black')
+            self.configure(foreground="black")
             self._showing_placeholder = False
 
     def _on_focus_out(self, event):
         if not self.get().strip():
             self.insert(0, self.placeholder)
-            self.configure(foreground='gray')
+            self.configure(foreground="gray")
             self._showing_placeholder = True
 
     def _on_key_release(self, event):
-        # Skip debounce for navigation keys
-        if event.keysym in ('Up', 'Down', 'Left', 'Right', 'Tab', 'Return',
-                            'Shift_L', 'Shift_R', 'Control_L', 'Control_R',
-                            'Alt_L', 'Alt_R', 'Escape'):
+        NAV_KEYS = {
+            "Up", "Down", "Left", "Right", "Tab", "Return",
+            "Shift_L", "Shift_R", "Control_L", "Control_R",
+            "Alt_L", "Alt_R", "Escape",
+        }
+        if event.keysym in NAV_KEYS:
             return
 
         if self._debounce_id is not None:
             self.after_cancel(self._debounce_id)
-        self._debounce_id = self.after(150, self._fire_callback)
+        self._debounce_id = self.after(SEARCH_DEBOUNCE_MS, self._fire_callback)
 
     def _on_escape(self, event):
         self.delete(0, tk.END)
@@ -69,7 +80,7 @@ class SearchEntry(ttk.Entry):
 
     def _on_select_all(self, event):
         self.select_range(0, tk.END)
-        return 'break'
+        return "break"
 
     def _fire_callback(self):
         if self._on_search_callback:
@@ -79,104 +90,87 @@ class SearchEntry(ttk.Entry):
 # ── Project Item Frame ──────────────────────────────────────────────────────
 
 class ProjectItemFrame(ttk.Frame):
-    """A single project row in the list. Supports double-click to launch."""
+    """A single project row in the list. Supports double-click to browse,
+    right-click for context menu."""
 
-    # Colors
-    COLOR_GIT = '#2ea043'       # green dot for git repos
-    COLOR_DEFAULT = '#58a6ff'   # blue dot for regular projects
-    COLOR_HOVER = '#e8e8e8'     # light hover background
-    COLOR_BG = '#ffffff'        # normal background
+    COLOR_GIT = COLOR_GIT_GREEN
+    COLOR_DEFAULT = COLOR_BLUE
+    COLOR_HOVER = COLOR_BG_HOVER
+    COLOR_BG = COLOR_BG_WHITE
 
-    def __init__(self, parent, project: ProjectInfo, on_enter=None, on_launch_ide=None, **kwargs):
+    def __init__(self, parent, project: ProjectInfo, on_enter=None,
+                 on_launch_ide=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.project = project
         self.on_enter = on_enter
         self.on_launch_ide = on_launch_ide
         self._hovering = False
 
-        self.configure(style='Project.TFrame', cursor='hand2')
+        self.configure(style="Project.TFrame", cursor="hand2")
 
-        # Build layout
         self._build()
         self._bind_events()
 
     def _build(self):
         """Build the widget layout."""
-        # Icon dot (colored circle indicator)
         self.icon_label = tk.Label(
             self,
-            text='●',
+            text="●",
             fg=self.COLOR_GIT if self.project.has_git else self.COLOR_DEFAULT,
             bg=self.COLOR_BG,
-            font=('Segoe UI', 14),
+            font=(FONT_FAMILY, FONT_SIZE_ICON),
         )
         self.icon_label.pack(side=tk.LEFT, padx=(12, 8), pady=8)
 
-        # Text area
-        text_frame = tk.Frame(self, bg=self.COLOR_BG, cursor='hand2')
+        text_frame = tk.Frame(self, bg=self.COLOR_BG, cursor="hand2")
         text_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=6)
 
         self.name_label = tk.Label(
-            text_frame,
-            text=self.project.name,
-            font=('Segoe UI', 11, 'bold'),
-            fg='#1e1e1e',
-            bg=self.COLOR_BG,
-            anchor='w',
-            cursor='hand2',
+            text_frame, text=self.project.name,
+            font=(FONT_FAMILY, FONT_SIZE_LARGE, "bold"),
+            fg=COLOR_TEXT_PRIMARY, bg=self.COLOR_BG,
+            anchor="w", cursor="hand2",
         )
         self.name_label.pack(fill=tk.X)
 
         self.path_label = tk.Label(
-            text_frame,
-            text=self.project.path,
-            font=('Segoe UI', 8),
-            fg='#888888',
-            bg=self.COLOR_BG,
-            anchor='w',
-            cursor='hand2',
+            text_frame, text=self.project.path,
+            font=(FONT_FAMILY, 8),
+            fg=COLOR_TEXT_TERTIARY, bg=self.COLOR_BG,
+            anchor="w", cursor="hand2",
         )
         self.path_label.pack(fill=tk.X)
 
-        # Right-side: last modified time
         time_str = self._format_time(self.project.last_modified)
         self.time_label = tk.Label(
-            self,
-            text=time_str,
-            font=('Segoe UI', 9),
-            fg='#888888',
-            bg=self.COLOR_BG,
-            cursor='hand2',
+            self, text=time_str,
+            font=(FONT_FAMILY, FONT_SIZE_STATUS),
+            fg=COLOR_TEXT_TERTIARY, bg=self.COLOR_BG,
+            cursor="hand2",
         )
         self.time_label.pack(side=tk.RIGHT, padx=(8, 12), pady=8)
 
-        # Separator line
-        sep = ttk.Separator(self, orient='horizontal')
+        sep = ttk.Separator(self, orient="horizontal")
         sep.place(relx=0, rely=0.98, relwidth=1, height=1)
 
     def _bind_events(self):
         """Bind mouse events for hover and click."""
-        all_widgets = [self, self.icon_label, self.name_label, self.path_label, self.time_label]
-        # Also find the text_frame
+        all_widgets = [self, self.icon_label, self.name_label,
+                       self.path_label, self.time_label]
         for child in self.winfo_children():
             if isinstance(child, tk.Frame):
                 all_widgets.append(child)
 
         for w in all_widgets:
-            w.bind('<Enter>', self._on_enter)
-            w.bind('<Leave>', self._on_leave)
-            w.bind('<Double-Button-1>', self._on_double_click)
-            w.bind('<Button-3>', self._on_right_click)
-
-        self.bind('<Enter>', self._on_enter)
-        self.bind('<Leave>', self._on_leave)
-        self.bind('<Double-Button-1>', self._on_double_click)
-        self.bind('<Button-3>', self._on_right_click)
+            w.bind("<Enter>", self._on_enter)
+            w.bind("<Leave>", self._on_leave)
+            w.bind("<Double-Button-1>", self._on_double_click)
+            w.bind("<Button-3>", self._on_right_click)
 
     def _format_time(self, timestamp: float) -> str:
         """Format a timestamp as a human-readable relative string."""
         if timestamp == 0.0:
-            return ''
+            return ""
         try:
             dt = datetime.fromtimestamp(timestamp)
             now = datetime.now()
@@ -184,26 +178,26 @@ class ProjectItemFrame(ttk.Frame):
 
             if delta.days == 0:
                 if delta.seconds < 60:
-                    return '刚刚'
+                    return TIME_JUST_NOW
                 elif delta.seconds < 3600:
-                    return f'{delta.seconds // 60}分钟前'
+                    return f"{delta.seconds // 60}{TIME_MINUTES_AGO}"
                 else:
-                    return f'{delta.seconds // 3600}小时前'
+                    return f"{delta.seconds // 3600}{TIME_HOURS_AGO}"
             elif delta.days == 1:
-                return '昨天'
+                return TIME_YESTERDAY
             elif delta.days < 7:
-                return f'{delta.days}天前'
+                return f"{delta.days}{TIME_DAYS_AGO}"
             elif delta.days < 30:
-                return f'{delta.days // 7}周前'
+                return f"{delta.days // 7}{TIME_WEEKS_AGO}"
             else:
-                return dt.strftime('%Y-%m-%d')
+                return dt.strftime("%Y-%m-%d")
         except (OSError, ValueError):
-            return ''
+            return ""
 
     def _on_enter(self, event):
         if not self._hovering:
             self._hovering = True
-            self.configure(style='ProjectHover.TFrame')
+            self.configure(style="ProjectHover.TFrame")
             for child in self._all_recolor_targets():
                 try:
                     child.configure(bg=self.COLOR_HOVER)
@@ -213,7 +207,7 @@ class ProjectItemFrame(ttk.Frame):
     def _on_leave(self, event):
         if self._hovering:
             self._hovering = False
-            self.configure(style='Project.TFrame')
+            self.configure(style="Project.TFrame")
             for child in self._all_recolor_targets():
                 try:
                     child.configure(bg=self.COLOR_BG)
@@ -237,12 +231,13 @@ class ProjectItemFrame(ttk.Frame):
     def _on_right_click(self, event):
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(
-            label='🚀 启动程序',
-            command=lambda: self._launch_explorer()
+            label="🚀 启动程序",
+            command=lambda: self._launch_explorer(),
         )
         menu.add_command(
-            label='💻 使用绑定 IDE 打开项目',
-            command=lambda: self.on_launch_ide(self.project) if self.on_launch_ide else None
+            label="💻 使用绑定 IDE 打开项目",
+            command=lambda: self.on_launch_ide(self.project)
+            if self.on_launch_ide else None,
         )
         menu.tk_popup(event.x_root, event.y_root)
 
@@ -257,12 +252,10 @@ class ProjectItemFrame(ttk.Frame):
 # ── Directory Entry Frame ────────────────────────────────────────────────────
 
 class DirectoryEntryFrame(ttk.Frame):
-    """A single entry in the directory browser view. Supports double-click to
-    navigate into subdirectories."""
+    """A single entry in the directory browser view."""
 
-    COLOR_DIR = '#58a6ff'
-    COLOR_HOVER = '#e8e8e8'
-    COLOR_BG = '#ffffff'
+    COLOR_HOVER = COLOR_BG_HOVER
+    COLOR_BG = COLOR_BG_WHITE
 
     def __init__(self, parent, name: str, path: str, is_dir: bool = False,
                  on_click=None, **kwargs):
@@ -273,32 +266,24 @@ class DirectoryEntryFrame(ttk.Frame):
         self.on_click = on_click
         self._hovering = False
 
-        self.configure(style='Project.TFrame',
-                       cursor='hand2' if is_dir else 'arrow')
+        self.configure(style="Project.TFrame",
+                       cursor="hand2" if is_dir else "arrow")
 
-        # Icon
-        icon = '📁' if is_dir else '📄'
+        icon = "📁" if is_dir else "📄"
         self.icon_label = tk.Label(
-            self,
-            text=icon,
-            font=('Segoe UI', 14),
-            bg=self.COLOR_BG,
+            self, text=icon,
+            font=(FONT_FAMILY, FONT_SIZE_ICON), bg=self.COLOR_BG,
         )
         self.icon_label.pack(side=tk.LEFT, padx=(12, 8), pady=6)
 
-        # Name
         self.name_label = tk.Label(
-            self,
-            text=name,
-            font=('Segoe UI', 11),
-            fg='#1e1e1e',
-            bg=self.COLOR_BG,
-            anchor='w',
+            self, text=name,
+            font=(FONT_FAMILY, FONT_SIZE_NORMAL),
+            fg=COLOR_TEXT_PRIMARY, bg=self.COLOR_BG, anchor="w",
         )
         self.name_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=6)
 
-        # Separator
-        sep = ttk.Separator(self, orient='horizontal')
+        sep = ttk.Separator(self, orient="horizontal")
         sep.place(relx=0, rely=0.98, relwidth=1, height=1)
 
         if is_dir:
@@ -308,14 +293,14 @@ class DirectoryEntryFrame(ttk.Frame):
         """Bind hover and click events for directory entries."""
         targets = [self, self.icon_label, self.name_label]
         for w in targets:
-            w.bind('<Enter>', self._on_enter)
-            w.bind('<Leave>', self._on_leave)
-            w.bind('<Double-Button-1>', self._on_double_click)
+            w.bind("<Enter>", self._on_enter)
+            w.bind("<Leave>", self._on_leave)
+            w.bind("<Double-Button-1>", self._on_double_click)
 
     def _on_enter(self, event):
         if not self._hovering:
             self._hovering = True
-            self.configure(style='ProjectHover.TFrame')
+            self.configure(style="ProjectHover.TFrame")
             for child in (self.icon_label, self.name_label):
                 try:
                     child.configure(bg=self.COLOR_HOVER)
@@ -325,7 +310,7 @@ class DirectoryEntryFrame(ttk.Frame):
     def _on_leave(self, event):
         if self._hovering:
             self._hovering = False
-            self.configure(style='Project.TFrame')
+            self.configure(style="Project.TFrame")
             for child in (self.icon_label, self.name_label):
                 try:
                     child.configure(bg=self.COLOR_BG)
@@ -337,13 +322,8 @@ class DirectoryEntryFrame(ttk.Frame):
             self.on_click(self.entry_path)
 
 
-# ── helpers ─────────────────────────────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────────────────
 
 def show_error(parent, title: str, message: str):
     """Show an error dialog."""
     messagebox.showerror(title, message, parent=parent)
-
-
-def show_info(parent, title: str, message: str):
-    """Show an info dialog."""
-    messagebox.showinfo(title, message, parent=parent)

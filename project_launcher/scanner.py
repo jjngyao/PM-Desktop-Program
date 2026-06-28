@@ -9,6 +9,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Set
 
+from constants import README_EXTENSIONS
+
 
 @dataclass
 class ProjectInfo:
@@ -28,6 +30,98 @@ class ScanResult:
     errors: List[str] = field(default_factory=list)
     skipped_count: int = 0
 
+
+# ── Per-entry processing ────────────────────────────────────────────────────
+
+class _SkipReason:
+    """Internal sentinel — why an entry was skipped."""
+    NOT_DIR = object()
+    PERM_ERROR = object()
+    OS_ERROR = object()
+    HIDDEN = object()
+    EXCLUDED = object()
+
+
+def _build_project_info(entry: os.DirEntry, excluded_dirs: Set[str]) -> tuple:
+    """Convert a single directory entry into a ProjectInfo.
+
+    Returns (ProjectInfo | None, skip_reason | None).
+    *skip_reason* is one of _SkipReason attributes, or None if the entry
+    was successfully converted.
+    """
+    # Check if it's a directory
+    try:
+        is_dir = entry.is_dir()
+    except PermissionError:
+        return None, _SkipReason.PERM_ERROR
+    except OSError:
+        return None, _SkipReason.OS_ERROR
+
+    if not is_dir:
+        return None, _SkipReason.NOT_DIR
+
+    name = entry.name
+
+    if name.startswith('.'):
+        return None, _SkipReason.HIDDEN
+    if name in excluded_dirs:
+        return None, _SkipReason.EXCLUDED
+
+    # Gather metadata
+    try:
+        stat = entry.stat()
+        last_modified = stat.st_mtime
+    except OSError:
+        last_modified = 0.0
+
+    has_git = os.path.isdir(os.path.join(entry.path, '.git'))
+    has_readme = any(
+        os.path.isfile(os.path.join(entry.path, f'README{ext}'))
+        for ext in README_EXTENSIONS
+    )
+
+    return ProjectInfo(
+        name=name,
+        path=entry.path,
+        last_modified=last_modified,
+        has_git=has_git,
+        has_readme=has_readme,
+        hidden=False,
+    ), None
+
+
+# ── Directory validation ────────────────────────────────────────────────────
+
+def _list_directory(base_dir: str, result: ScanResult, callback) -> Optional[List[os.DirEntry]]:
+    """Validate *base_dir* and list its entries.
+
+    Populates *result.errors* and calls *callback('error', ...)* on failure.
+    Returns the entry list, or None if the directory is inaccessible.
+    """
+    if not base_dir or not os.path.isdir(base_dir):
+        err_msg = f"Directory does not exist or is not accessible: {base_dir}"
+        result.errors.append(err_msg)
+        if callback:
+            callback('error', {'message': err_msg})
+        return None
+
+    try:
+        return list(os.scandir(base_dir))
+    except PermissionError:
+        err_msg = f"Permission denied accessing: {base_dir}"
+        result.errors.append(err_msg)
+        if callback:
+            callback('error', {'message': err_msg})
+        return None
+    except OSError as e:
+        err_msg = f"Cannot read directory {base_dir}: {e}"
+        result.errors.append(err_msg)
+        if callback:
+            callback('error', {'message': err_msg})
+        return None
+
+
+# ── Main scan ───────────────────────────────────────────────────────────────
 
 def scan_projects(
     base_dir: str,
@@ -55,28 +149,8 @@ def scan_projects(
 
     result = ScanResult()
 
-    # Validate base directory
-    if not base_dir or not os.path.isdir(base_dir):
-        err_msg = f"Directory does not exist or is not accessible: {base_dir}"
-        result.errors.append(err_msg)
-        if callback:
-            callback('error', {'message': err_msg})
-        return result
-
-    # Collect entries
-    try:
-        entries = list(os.scandir(base_dir))
-    except PermissionError:
-        err_msg = f"Permission denied accessing: {base_dir}"
-        result.errors.append(err_msg)
-        if callback:
-            callback('error', {'message': err_msg})
-        return result
-    except OSError as e:
-        err_msg = f"Cannot read directory {base_dir}: {e}"
-        result.errors.append(err_msg)
-        if callback:
-            callback('error', {'message': err_msg})
+    entries = _list_directory(base_dir, result, callback)
+    if entries is None:
         return result
 
     total = len(entries)
@@ -85,50 +159,14 @@ def scan_projects(
     for entry in entries:
         processed += 1
 
-        # Skip files — only directories are projects
-        try:
-            if not entry.is_dir():
-                continue
-        except PermissionError:
-            result.skipped_count += 1
-            continue
-        except OSError:
+        info, skip_reason = _build_project_info(entry, excluded_dirs)
+        if info is None:
+            if skip_reason is _SkipReason.PERM_ERROR:
+                result.skipped_count += 1
             continue
 
-        name = entry.name
+        result.projects.append(info)
 
-        # Skip hidden dirs (names starting with .)
-        if name.startswith('.'):
-            continue
-
-        # Skip user-configured exclusions
-        if name in excluded_dirs:
-            continue
-
-        # Gather metadata
-        try:
-            stat = entry.stat()
-            last_modified = stat.st_mtime
-        except OSError:
-            last_modified = 0.0
-
-        has_git = os.path.isdir(os.path.join(entry.path, '.git'))
-        has_readme = any(
-            os.path.isfile(os.path.join(entry.path, f'README{ext}'))
-            for ext in ('', '.md', '.txt', '.rst')
-        )
-
-        project = ProjectInfo(
-            name=name,
-            path=entry.path,
-            last_modified=last_modified,
-            has_git=has_git,
-            has_readme=has_readme,
-            hidden=False,
-        )
-        result.projects.append(project)
-
-        # Report progress
         if callback:
             callback('progress', {'current': processed, 'total': total})
 
