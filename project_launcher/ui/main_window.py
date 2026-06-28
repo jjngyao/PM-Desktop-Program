@@ -5,6 +5,7 @@ Provides the search bar, scrollable project list, status bar, and settings acces
 
 import ctypes
 import os
+import shutil
 import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -32,6 +33,8 @@ class MainWindow:
         self._dir_frames: List[DirectoryEntryFrame] = []
         self._nav_frame: Optional[tk.Frame] = None
         self._scan_thread = None
+        self._pending_drops: List[List[str]] = []   # queue for drag-drop files
+        self._drop_poll_id: Optional[str] = None
 
         # ── Root window ─────────────────────────────────────────────────
 
@@ -606,6 +609,365 @@ class MainWindow:
             frame.destroy()
         self._dir_frames.clear()
 
+    # ── Drag-and-drop file copy ────────────────────────────────────────────
+
+    def _setup_drop_target(self):
+        """Register the root window as a Windows drop target via WM_DROPFILES.
+
+        Uses SetWindowSubclass (comctl32.dll) to safely add a subclass
+        procedure without replacing Tk's own WNDPROC.  This is the
+        recommended Windows API for window subclassing and avoids having
+        Tk accidentally reset our hook.
+        """
+        if sys.platform != 'win32':
+            return
+
+        try:
+            hwnd = self.root.winfo_id()
+        except tk.TclError:
+            return  # window not yet realized
+
+        # ── Set argtypes for ALL shell32 drag-drop functions ───────────
+        # CRITICAL: without explicit argtypes, ctypes defaults pointer-sized
+        # parameters (HWND, HDROP) to c_int (32-bit), causing OverflowError
+        # on 64-bit Windows when the handle value exceeds 2³¹.
+        sh = ctypes.windll.shell32
+        sh.DragAcceptFiles.argtypes = [ctypes.c_longlong, ctypes.c_int]
+        sh.DragQueryFileW.argtypes = [
+            ctypes.c_longlong,   # HDROP
+            ctypes.c_uint,       # UINT iFile
+            ctypes.c_wchar_p,    # LPWSTR lpszFile (or NULL)
+            ctypes.c_uint,       # UINT cch
+        ]
+        sh.DragQueryFileW.restype = ctypes.c_uint
+        sh.DragFinish.argtypes = [ctypes.c_longlong]  # HDROP
+
+        # ── SUBCLASSPROC signature ───────────────────────────────────────
+        SUBCLASSPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_longlong,   # return: LRESULT
+            ctypes.c_longlong,   # HWND
+            ctypes.c_uint,       # UINT  msg
+            ctypes.c_longlong,   # WPARAM
+            ctypes.c_longlong,   # LPARAM
+            ctypes.c_longlong,   # UINT_PTR  uIdSubclass
+            ctypes.c_longlong,   # DWORD_PTR dwRefData
+        )
+
+        # ── Build the subclass procedure closure ─────────────────────────
+        # WARNING: an unhandled Python exception inside a ctypes callback
+        # can terminate the process instantly (C stack unwinding).  Wrap
+        # EVERYTHING in a blanket try/except to prevent crashes.
+        #
+        # IMPORTANT: to avoid C-level crashes (which Python try/except
+        # cannot catch), we never call any Tkinter API from inside this
+        # callback.  Instead we push file paths onto a thread-safe list
+        # and let a periodic Tkinter timer drain it.
+
+        self._pending_drops: List[List[str]] = []
+
+        @SUBCLASSPROC
+        def subclass_proc(hwnd, msg, wparam, lparam, _uid, _ref):
+            WM_DROPFILES = 0x0233
+            try:
+                if msg == WM_DROPFILES:
+                    hdrop = wparam
+
+                    # Validate the handle — hdrop from wparam should be
+                    # non-zero for a real drop.
+                    if not hdrop:
+                        return 0
+
+                    count = sh.DragQueryFileW(hdrop, 0xFFFFFFFF, None, 0)
+                    # Sanity-check: a single drag operation shouldn't
+                    # produce more than 10 000 files.
+                    if count == 0 or count > 10000:
+                        sh.DragFinish(hdrop)
+                        return 0
+
+                    files: List[str] = []
+                    for i in range(count):
+                        buf = ctypes.create_unicode_buffer(260)
+                        sh.DragQueryFileW(hdrop, i, buf, 260)
+                        files.append(buf.value)
+
+                    sh.DragFinish(hdrop)
+
+                    if files:
+                        # Push to pending queue — NEVER call Tkinter here
+                        self._pending_drops.append(files)
+                    return 0
+
+                # All other messages → continue the subclass chain
+                return ctypes.windll.comctl32.DefSubclassProc(
+                    hwnd, msg, wparam, lparam
+                )
+            except Exception:
+                # Never let an exception escape a ctypes callback
+                import traceback, tempfile
+                try:
+                    _p = os.path.join(tempfile.gettempdir(),
+                                       'project_launcher_dnd_crash.log')
+                    with open(_p, 'a', encoding='utf-8') as _f:
+                        _f.write(traceback.format_exc() + '\n')
+                except Exception:
+                    pass
+                return 0
+
+        self._subclass_proc_ref = subclass_proc
+
+        # ── Install the subclass ─────────────────────────────────────────
+
+        comctl32 = ctypes.windll.comctl32
+        comctl32.SetWindowSubclass.argtypes = [
+            ctypes.c_longlong,   # HWND
+            SUBCLASSPROC,        # SUBCLASSPROC
+            ctypes.c_longlong,   # UINT_PTR uIdSubclass
+            ctypes.c_longlong,   # DWORD_PTR dwRefData
+        ]
+        comctl32.SetWindowSubclass.restype = ctypes.c_int  # BOOL
+        comctl32.DefSubclassProc.argtypes = [
+            ctypes.c_longlong, ctypes.c_uint, ctypes.c_longlong, ctypes.c_longlong,
+        ]
+        comctl32.DefSubclassProc.restype = ctypes.c_longlong
+
+        ok = comctl32.SetWindowSubclass(hwnd, subclass_proc, 42, 0)
+        if not ok:
+            # Fallback: try the old-style WNDPROC replacement
+            self._setup_drop_target_fallback(hwnd)
+            return
+
+        # Register the window to accept dropped files
+        sh.DragAcceptFiles(hwnd, True)
+
+        # Start the polling timer that drains _pending_drops on the
+        # Tkinter main thread (never from inside the C callback).
+        self._poll_drop_queue()
+
+    def _poll_drop_queue(self):
+        """Periodically check for files appended by the subclass proc and
+        hand them off to the normal file-copy pipeline on the main thread."""
+        try:
+            # Process at most one batch per tick to keep the UI responsive
+            if self._pending_drops:
+                batch = self._pending_drops.pop(0)
+                self._handle_dropped_files(batch)
+        except Exception:
+            pass  # defence in depth — logged inside _handle_dropped_files
+        # Poll every 200 ms
+        self._drop_poll_id = self.root.after(200, self._poll_drop_queue)
+
+    def _setup_drop_target_fallback(self, hwnd):
+        """Fallback: direct WNDPROC replacement when SetWindowSubclass fails
+        (extremely rare — only on pre-XP systems or corrupted comctl32)."""
+        GWL_WNDPROC = -4
+
+        WNDPROC_TYPE = ctypes.WINFUNCTYPE(
+            ctypes.c_longlong, ctypes.c_longlong,
+            ctypes.c_uint, ctypes.c_longlong, ctypes.c_longlong,
+        )
+
+        user32 = ctypes.windll.user32
+        user32.SetWindowLongPtrW.argtypes = [
+            ctypes.c_longlong, ctypes.c_int, ctypes.c_longlong,
+        ]
+        user32.SetWindowLongPtrW.restype = ctypes.c_longlong
+        user32.CallWindowProcW.argtypes = [
+            ctypes.c_longlong, ctypes.c_longlong,
+            ctypes.c_uint, ctypes.c_longlong, ctypes.c_longlong,
+        ]
+        user32.CallWindowProcW.restype = ctypes.c_longlong
+
+        # Keep a separate reference to the fallback callback
+        _fallback_ref = WNDPROC_TYPE(self._drop_wndproc_fallback)
+        self._fallback_wndproc_ref = _fallback_ref
+        self._fallback_original = user32.GetWindowLongPtrW(hwnd, GWL_WNDPROC)
+
+        new_addr = ctypes.cast(_fallback_ref, ctypes.c_void_p).value
+        user32.SetWindowLongPtrW(hwnd, GWL_WNDPROC, new_addr)
+
+        ctypes.windll.shell32.DragAcceptFiles(hwnd, True)
+
+    def _drop_wndproc_fallback(self, hwnd, msg, wparam, lparam):
+        """Fallback WNDPROC — same logic as the subclass proc above.
+        Uses the pending-queue pattern (no Tkinter calls from C callback)."""
+        WM_DROPFILES = 0x0233
+        try:
+            if msg == WM_DROPFILES:
+                hdrop = wparam
+                if not hdrop:
+                    return 0
+                shell32 = ctypes.windll.shell32
+                count = shell32.DragQueryFileW(hdrop, 0xFFFFFFFF, None, 0)
+                if count == 0 or count > 10000:
+                    shell32.DragFinish(hdrop)
+                    return 0
+                files: List[str] = []
+                for i in range(count):
+                    buf = ctypes.create_unicode_buffer(260)
+                    shell32.DragQueryFileW(hdrop, i, buf, 260)
+                    files.append(buf.value)
+                shell32.DragFinish(hdrop)
+                if files:
+                    self._pending_drops.append(files)
+                return 0
+            return ctypes.windll.user32.CallWindowProcW(
+                self._fallback_original, hwnd, msg, wparam, lparam
+            )
+        except Exception:
+            import traceback, tempfile
+            try:
+                _p = os.path.join(tempfile.gettempdir(),
+                                   'project_launcher_dnd_crash.log')
+                with open(_p, 'a', encoding='utf-8') as _f:
+                    _f.write(traceback.format_exc() + '\n')
+            except Exception:
+                pass
+            return 0
+
+    def _handle_dropped_files(self, files: List[str]):
+        """Copy dropped files to the current target directory.
+
+        Target directory determination:
+        - Directory-browsing mode (_browsing_path not None) → _browsing_path
+        - Project-list mode (_browsing_path is None) → base_directory
+        - Neither → show a warning
+        """
+        try:
+            self._handle_dropped_files_impl(files)
+        except Exception:
+            import traceback, tempfile
+            try:
+                _p = os.path.join(tempfile.gettempdir(),
+                                   'project_launcher_dnd_crash.log')
+                with open(_p, 'a', encoding='utf-8') as _f:
+                    _f.write(traceback.format_exc() + '\n')
+            except Exception:
+                pass
+            messagebox.showerror(
+                '拖放错误',
+                f'处理拖放文件时出错，详情请查看:\n'
+                f'{os.path.join(tempfile.gettempdir(), "project_launcher_dnd_crash.log")}',
+                parent=self.root,
+            )
+
+    def _handle_dropped_files_impl(self, files: List[str]):
+        # ── Determine target directory ───────────────────────────────────
+
+        if self._browsing_path:
+            target_dir = self._browsing_path
+        else:
+            target_dir = self.config.get('base_directory', '')
+
+        if not target_dir:
+            messagebox.showwarning(
+                '无法复制',
+                '请先在设置中配置基础目录，或双击项目进入目录浏览模式。',
+                parent=self.root,
+            )
+            return
+
+        if not os.path.isdir(target_dir):
+            messagebox.showwarning(
+                '目录不存在',
+                f'目标目录不存在:\n{target_dir}',
+                parent=self.root,
+            )
+            return
+
+        # ── Check for filename conflicts ─────────────────────────────────
+
+        existing_names: List[str] = []
+        for f in files:
+            name = os.path.basename(f)
+            if os.path.exists(os.path.join(target_dir, name)):
+                existing_names.append(name)
+
+        overwrite = False
+        skip_existing = False
+
+        if existing_names:
+            # Show a single dialog asking what to do
+            if len(existing_names) <= 5:
+                names_str = '\n'.join(f'  • {n}' for n in existing_names)
+                msg = f'以下项目已存在:\n{names_str}\n\n是否覆盖？'
+            else:
+                msg = f'{len(existing_names)} 个项目已存在，是否覆盖？'
+
+            answer = messagebox.askyesnocancel(
+                '冲突',
+                msg + '\n\n"是" = 覆盖全部  |  "否" = 跳过全部  |  "取消" = 放弃复制',
+                parent=self.root,
+            )
+            if answer is None:
+                return  # cancelled
+            elif answer:
+                overwrite = True
+            else:
+                skip_existing = True
+
+        # ── Copy files & folders ─────────────────────────────────────────
+
+        copied = 0
+        skipped = 0
+        failed = 0
+
+        total = len(files)
+        for i, src in enumerate(files, 1):
+            name = os.path.basename(src)
+            dst = os.path.join(target_dir, name)
+
+            # Skip if target exists and user chose to skip
+            if skip_existing and os.path.exists(dst):
+                skipped += 1
+                continue
+
+            # Update status bar
+            self.status_label.config(text=f'正在复制... {i}/{total}')
+            self.root.update_idletasks()
+
+            try:
+                if os.path.isdir(src):
+                    # Remove existing target before copytree if overwriting
+                    if overwrite and os.path.exists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
+                else:
+                    shutil.copy2(src, dst)
+                copied += 1
+            except (OSError, shutil.SameFileError, PermissionError):
+                failed += 1
+
+        # ── Show summary ─────────────────────────────────────────────────
+
+        parts = [f'成功 {copied} 个']
+        if skipped:
+            parts.append(f'跳过 {skipped} 个')
+        if failed:
+            parts.append(f'失败 {failed} 个')
+        summary = '，'.join(parts)
+
+        messagebox.showinfo(
+            '复制完成',
+            f'{summary}\n\n目标: {target_dir}',
+            parent=self.root,
+        )
+
+        # ── Restore status bar ───────────────────────────────────────────
+
+        base = self.config.get('base_directory', '')
+        if self._browsing_path:
+            self.status_label.config(text=f'浏览: {self._browsing_path}')
+        elif base:
+            self.status_label.config(text=f'{len(self.projects)} 个项目 | {base}')
+        else:
+            self.status_label.config(text='就绪')
+
+        # ── Refresh the view if needed ───────────────────────────────────
+
+        if self._view_mode == 'directory' and self._browsing_path:
+            # Refresh the directory listing to show newly copied files
+            self._show_directory(self._browsing_path)
+
     # ── New folder ─────────────────────────────────────────────────────────
 
     def _on_new_folder(self):
@@ -714,4 +1076,20 @@ class MainWindow:
 
     def run(self):
         """Start the Tkinter main loop."""
+        # Force Tk to fully materialise the window before we install the
+        # drop-target subclass — avoids interfering with Tk's own WNDPROC
+        # initialisation.
+        self.root.update_idletasks()
+        self._setup_drop_target()
+
+        # Enable fault handler for C-level crash diagnostics
+        try:
+            import faulthandler
+            _crash_log = os.path.join(
+                os.environ.get('TEMP', '.'), 'project_launcher_fault.log'
+            )
+            faulthandler.enable(file=open(_crash_log, 'a', encoding='utf-8'))
+        except Exception:
+            pass
+
         self.root.mainloop()
