@@ -99,11 +99,12 @@ class ProjectItemFrame(ttk.Frame):
     COLOR_BG = COLOR_BG_WHITE
 
     def __init__(self, parent, project: ProjectInfo, on_enter=None,
-                 on_launch_ide=None, **kwargs):
+                 on_launch_ide=None, on_delete=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.project = project
         self.on_enter = on_enter
         self.on_launch_ide = on_launch_ide
+        self.on_delete = on_delete
         self._hovering = False
 
         self.configure(style="Project.TFrame", cursor="hand2")
@@ -239,6 +240,12 @@ class ProjectItemFrame(ttk.Frame):
             command=lambda: self.on_launch_ide(self.project)
             if self.on_launch_ide else None,
         )
+        menu.add_separator()
+        menu.add_command(
+            label="🗑️ 删除项目",
+            command=lambda: self.on_delete(self.project)
+            if self.on_delete else None,
+        )
         menu.tk_popup(event.x_root, event.y_root)
 
     def _launch_explorer(self):
@@ -252,18 +259,23 @@ class ProjectItemFrame(ttk.Frame):
 # ── Directory Entry Frame ────────────────────────────────────────────────────
 
 class DirectoryEntryFrame(ttk.Frame):
-    """A single entry in the directory browser view."""
+    """A single entry in the directory browser view. Supports hover,
+    double-click (directories), and right-click context menu (all entries)."""
 
     COLOR_HOVER = COLOR_BG_HOVER
     COLOR_BG = COLOR_BG_WHITE
 
     def __init__(self, parent, name: str, path: str, is_dir: bool = False,
-                 on_click=None, **kwargs):
+                 on_click=None, on_open=None, on_open_folder=None,
+                 on_delete=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.entry_name = name
         self.entry_path = path
         self.is_dir = is_dir
         self.on_click = on_click
+        self.on_open = on_open
+        self.on_open_folder = on_open_folder
+        self.on_delete = on_delete
         self._hovering = False
 
         self.configure(style="Project.TFrame",
@@ -286,16 +298,18 @@ class DirectoryEntryFrame(ttk.Frame):
         sep = ttk.Separator(self, orient="horizontal")
         sep.place(relx=0, rely=0.98, relwidth=1, height=1)
 
-        if is_dir:
-            self._bind_events()
+        self._bind_events()
 
     def _bind_events(self):
-        """Bind hover and click events for directory entries."""
+        """Bind hover, click, and right-click events for all entries.
+        Double-click is only meaningful for directories."""
         targets = [self, self.icon_label, self.name_label]
         for w in targets:
             w.bind("<Enter>", self._on_enter)
             w.bind("<Leave>", self._on_leave)
-            w.bind("<Double-Button-1>", self._on_double_click)
+            w.bind("<Button-3>", self._on_right_click)
+            if self.is_dir:
+                w.bind("<Double-Button-1>", self._on_double_click)
 
     def _on_enter(self, event):
         if not self._hovering:
@@ -320,6 +334,39 @@ class DirectoryEntryFrame(ttk.Frame):
     def _on_double_click(self, event):
         if self.on_click:
             self.on_click(self.entry_path)
+
+    def _on_right_click(self, event):
+        menu = tk.Menu(self, tearoff=0)
+        if self.is_dir:
+            menu.add_command(
+                label="📂 在资源管理器中打开",
+                command=lambda: self.on_open(self.entry_path)
+                if self.on_open else None,
+            )
+            menu.add_separator()
+            menu.add_command(
+                label="🗑️ 删除文件夹",
+                command=lambda: self.on_delete(self.entry_path)
+                if self.on_delete else None,
+            )
+        else:
+            menu.add_command(
+                label="📄 打开文件",
+                command=lambda: self.on_open(self.entry_path)
+                if self.on_open else None,
+            )
+            menu.add_command(
+                label="📂 打开所在文件夹",
+                command=lambda: self.on_open_folder(self.entry_path)
+                if self.on_open_folder else None,
+            )
+            menu.add_separator()
+            menu.add_command(
+                label="🗑️ 删除文件",
+                command=lambda: self.on_delete(self.entry_path)
+                if self.on_delete else None,
+            )
+        menu.tk_popup(event.x_root, event.y_root)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

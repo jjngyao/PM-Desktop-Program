@@ -6,6 +6,7 @@ Delegates directory browsing and drag-and-drop to dedicated controller modules.
 
 import ctypes
 import os
+import shutil
 import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -366,6 +367,7 @@ class MainWindow:
                 self.list_frame, project,
                 on_enter=self._on_enter_project,
                 on_launch_ide=self._on_launch_ide,
+                on_delete=self._on_delete_project,
             )
             frame.pack(fill=tk.X)
             self.project_frames.append(frame)
@@ -426,6 +428,45 @@ class MainWindow:
         from datetime import datetime
         last_opened[project.path] = datetime.now().isoformat()
         save_config(self.config)
+
+    def _on_delete_project(self, project: ProjectInfo):
+        """Handle 'Delete Project' action — remove the project directory."""
+        if not os.path.isdir(project.path):
+            show_error(
+                self.root, "项目不存在",
+                f"项目目录已不存在:\n{project.path}\n\n正在刷新列表...",
+            )
+            self.refresh()
+            return
+
+        confirmed = messagebox.askyesno(
+            "确认删除",
+            f"确定要删除以下项目吗？\n\n"
+            f"📁 {project.name}\n"
+            f"📂 {project.path}\n\n"
+            f"此操作不可撤销！",
+            parent=self.root,
+        )
+        if not confirmed:
+            return
+
+        try:
+            shutil.rmtree(project.path)
+        except OSError as e:
+            show_error(
+                self.root, "删除失败",
+                f"无法删除项目:\n{project.path}\n\n{e}",
+            )
+            return
+
+        # Remove from last_opened tracking
+        last_opened = self.config.get("last_opened", {})
+        if project.path in last_opened:
+            del last_opened[project.path]
+            save_config(self.config)
+
+        self.status_label.config(text=f"已删除: {project.name}")
+        self.refresh()
 
     # ── New folder ─────────────────────────────────────────────────────────
 

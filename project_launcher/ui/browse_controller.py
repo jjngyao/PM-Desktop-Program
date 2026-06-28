@@ -5,8 +5,9 @@ navigating back, and rendering directory entries.
 """
 
 import os
+import shutil
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from typing import List, Optional, TYPE_CHECKING
 
 from constants import (
@@ -14,9 +15,9 @@ from constants import (
     COLOR_BG_TOOLBAR_ACTIVE, COLOR_BG_HOVER,
     COLOR_TEXT_SECONDARY, COLOR_TEXT_PLACEHOLDER,
     FONT_FAMILY, FONT_SIZE_NORMAL, FONT_SIZE_EMPTY,
-    FONT_SIZE_LARGE, MAX_DIR_ENTRIES,
+    FONT_SIZE_LARGE, FONT_SIZE_STATUS, MAX_DIR_ENTRIES,
 )
-from ui.widgets import DirectoryEntryFrame
+from ui.widgets import DirectoryEntryFrame, show_error
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -123,6 +124,9 @@ class BrowseController:
                 entry.path,
                 is_dir=is_dir,
                 on_click=self._on_entry_click,
+                on_open=self._on_open_entry,
+                on_open_folder=self._on_open_containing_folder,
+                on_delete=self._on_delete_entry,
             )
             frame.pack(fill=tk.X)
             self._dir_frames.append(frame)
@@ -133,6 +137,60 @@ class BrowseController:
         """Handle clicking a directory entry — navigate into it."""
         self._browse_history.append((self._browsing_path, "directory"))
         self._show_directory(path)
+
+    # ── Right-click actions ────────────────────────────────────────────────
+
+    def _on_open_entry(self, path: str):
+        """Open an entry: folders in Explorer, files with default program."""
+        try:
+            os.startfile(path)
+        except OSError:
+            pass
+
+    def _on_open_containing_folder(self, path: str):
+        """Open the parent folder in Explorer, selecting the file."""
+        try:
+            os.startfile(os.path.dirname(path))
+        except OSError:
+            pass
+
+    def _on_delete_entry(self, path: str):
+        """Delete a file or folder after confirmation, then refresh."""
+        if not os.path.exists(path):
+            show_error(
+                self._main.root, "不存在",
+                f"此项已不存在:\n{path}\n\n正在刷新...",
+            )
+            self.refresh_current()
+            return
+
+        name = os.path.basename(path)
+        item_type = "文件夹" if os.path.isdir(path) else "文件"
+        confirmed = messagebox.askyesno(
+            "确认删除",
+            f"确定要删除以下{item_type}吗？\n\n"
+            f"📁 {name}\n"
+            f"📂 {path}\n\n"
+            f"此操作不可撤销！",
+            parent=self._main.root,
+        )
+        if not confirmed:
+            return
+
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+        except OSError as e:
+            show_error(
+                self._main.root, "删除失败",
+                f"无法删除{item_type}:\n{path}\n\n{e}",
+            )
+            return
+
+        self._main.status_label.config(text=f"已删除: {name}")
+        self.refresh_current()
 
     # ── Navigation bar ────────────────────────────────────────────────────
 
