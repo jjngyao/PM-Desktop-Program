@@ -410,24 +410,27 @@ class MainWindow:
 
     def _on_launch_ide(self, project: ProjectInfo):
         """Handle 'Open with IDE' action — launch project in the bound IDE."""
-        if not self.current_ide:
-            self.current_ide = IDEInfo("explorer", "文件资源管理器", "")
-
-        success = launch(project.path, self.current_ide)
-
-        if not success and not os.path.isdir(project.path):
-            show_error(
-                self.root, "项目不存在",
-                f"项目目录已不存在:\n{project.path}\n\n正在刷新列表...",
-            )
-            self.refresh()
-            return
+        self.launch_ide_for_path(project.path)
 
         # Update last_opened timestamp
         last_opened = self.config.setdefault("last_opened", {})
         from datetime import datetime
         last_opened[project.path] = datetime.now().isoformat()
         save_config(self.config)
+
+    def launch_ide_for_path(self, path: str):
+        """Launch the bound IDE for a given path (used by browse controller)."""
+        if not self.current_ide:
+            self.current_ide = IDEInfo("explorer", "文件资源管理器", "")
+
+        success = launch(path, self.current_ide)
+
+        if not success and not os.path.isdir(path):
+            show_error(
+                self.root, "路径不存在",
+                f"目录已不存在:\n{path}\n\n正在刷新列表...",
+            )
+            self.refresh()
 
     def _on_delete_project(self, project: ProjectInfo):
         """Handle 'Delete Project' action — remove the project directory."""
@@ -471,13 +474,23 @@ class MainWindow:
     # ── New folder ─────────────────────────────────────────────────────────
 
     def _on_new_folder(self):
-        """Handle 'New Folder' button — delegate to NewFolderDialog."""
+        """Handle 'New Folder' button — delegate to NewFolderDialog.
+        Defaults the path to the current browse directory, or the base directory
+        in project-list view."""
+        default_path = ""
+        if self.browse.is_active and self.browse.current_path:
+            default_path = self.browse.current_path + "/"
+        else:
+            base_dir = self.config.get("base_directory", "")
+            if base_dir:
+                default_path = base_dir + "/"
+
         def on_created(path: str):
             base_dir = self.config.get("base_directory", "")
             if base_dir and path.startswith(base_dir):
                 self.refresh()
 
-        NewFolderDialog(self.root, on_created=on_created)
+        NewFolderDialog(self.root, on_created=on_created, default_path=default_path)
 
     # ── Settings ────────────────────────────────────────────────────────────
 

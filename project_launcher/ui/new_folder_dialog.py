@@ -15,9 +15,10 @@ class NewFolderDialog:
         NewFolderDialog(parent, on_created=callback)
     """
 
-    def __init__(self, parent: tk.Tk, on_created=None):
+    def __init__(self, parent: tk.Tk, on_created=None, default_path: str = ""):
         self._parent = parent
         self._on_created = on_created
+        self._default_path = default_path
 
         self._dialog = tk.Toplevel(parent)
         self._dialog.title("新建文件夹")
@@ -56,7 +57,7 @@ class NewFolderDialog:
         entry_frame = ttk.Frame(frame)
         entry_frame.pack(fill=tk.X, pady=(8, 12))
 
-        self._path_var = tk.StringVar()
+        self._path_var = tk.StringVar(value=self._default_path)
         path_entry = ttk.Entry(
             entry_frame, textvariable=self._path_var,
             font=(FONT_FAMILY, FONT_SIZE_NORMAL),

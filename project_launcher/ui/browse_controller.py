@@ -127,6 +127,7 @@ class BrowseController:
                 on_open=self._on_open_entry,
                 on_open_folder=self._on_open_containing_folder,
                 on_delete=self._on_delete_entry,
+                on_launch_ide=self._on_launch_ide,
             )
             frame.pack(fill=tk.X)
             self._dir_frames.append(frame)
@@ -137,6 +138,10 @@ class BrowseController:
         """Handle clicking a directory entry — navigate into it."""
         self._browse_history.append((self._browsing_path, "directory"))
         self._show_directory(path)
+
+    def _on_launch_ide(self, path: str):
+        """Launch the bound IDE for the given directory path."""
+        self._main.launch_ide_for_path(path)
 
     # ── Right-click actions ────────────────────────────────────────────────
 

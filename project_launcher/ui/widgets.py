@@ -267,7 +267,7 @@ class DirectoryEntryFrame(ttk.Frame):
 
     def __init__(self, parent, name: str, path: str, is_dir: bool = False,
                  on_click=None, on_open=None, on_open_folder=None,
-                 on_delete=None, **kwargs):
+                 on_delete=None, on_launch_ide=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.entry_name = name
         self.entry_path = path
@@ -276,6 +276,7 @@ class DirectoryEntryFrame(ttk.Frame):
         self.on_open = on_open
         self.on_open_folder = on_open_folder
         self.on_delete = on_delete
+        self.on_launch_ide = on_launch_ide
         self._hovering = False
 
         self.configure(style="Project.TFrame",
@@ -342,6 +343,11 @@ class DirectoryEntryFrame(ttk.Frame):
                 label="📂 在资源管理器中打开",
                 command=lambda: self.on_open(self.entry_path)
                 if self.on_open else None,
+            )
+            menu.add_command(
+                label="💻 使用绑定 IDE 打开此文件夹",
+                command=lambda: self.on_launch_ide(self.entry_path)
+                if self.on_launch_ide else None,
             )
             menu.add_separator()
             menu.add_command(
