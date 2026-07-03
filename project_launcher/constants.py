@@ -11,9 +11,9 @@ APP_TITLE = "项目启动器"
 APP_FIND_WINDOW_TITLE = "Project Launcher"
 MUTEX_NAME = r"Global\ProjectLauncher_SingleInstance"
 
-DEFAULT_WINDOW_WIDTH = 900
+DEFAULT_WINDOW_WIDTH = 1000
 DEFAULT_WINDOW_HEIGHT = 600
-MIN_WINDOW_WIDTH = 400
+MIN_WINDOW_WIDTH = 780
 MIN_WINDOW_HEIGHT = 300
 
 # ── Search ─────────────────────────────────────────────────────────────────
@@ -46,6 +46,24 @@ DROP_POLL_INTERVAL_MS = 200
 DROP_MAX_FILES = 10_000
 DROP_PATH_BUFFER_SIZE = 260
 SUBCLASS_ID = 42  # arbitrary non-zero id for SetWindowSubclass
+
+# ── Layout ──────────────────────────────────────────────────────────────────
+
+LEFT_PANEL_MIN_WIDTH = 200
+LEFT_PANEL_DEFAULT_WIDTH = 240
+CHART_AREA_MIN_HEIGHT = 150
+CHART_AREA_DEFAULT_HEIGHT = 200
+
+# ── Left panel colors ───────────────────────────────────────────────────────
+
+COLOR_BG_LEFT_PANEL = "#f8f8f8"
+COLOR_SECTION_HEADER = "#333333"
+COLOR_SECTION_BORDER = "#dddddd"
+
+# ── Font sizes (additional) ──────────────────────────────────────────────────
+
+FONT_SIZE_SECTION = 11
+FONT_SIZE_SMALL = 9
 
 # ── Mouse ──────────────────────────────────────────────────────────────────
 
@@ -88,3 +106,57 @@ TIME_HOURS_AGO = "小时前"
 TIME_YESTERDAY = "昨天"
 TIME_DAYS_AGO = "天前"
 TIME_WEEKS_AGO = "周前"
+
+# ── Token chart ─────────────────────────────────────────────────────────────
+
+COLOR_CHART_BG = "#ffffff"
+COLOR_CHART_LINE = "#58a6ff"
+COLOR_CHART_FILL = "#e8f2ff"
+COLOR_CHART_POINT = "#58a6ff"
+COLOR_CHART_POINT_HOVER = "#1a7fd4"
+COLOR_CHART_AXIS = "#cccccc"
+COLOR_CHART_TEXT = "#888888"
+COLOR_CHART_GRID = "#f0f0f0"
+
+CHART_PADDING_LEFT = 60
+CHART_PADDING_RIGHT = 20
+CHART_PADDING_TOP = 20
+CHART_PADDING_BOTTOM = 40
+CHART_POINT_RADIUS = 4
+CHART_POINT_HOVER_RADIUS = 6
+CHART_LINE_WIDTH = 2
+CHART_MAX_DATA_POINTS = 365
+
+CHART_VIEW_DAILY = "daily"
+CHART_VIEW_WEEKLY = "weekly"
+
+CHART_EMPTY_TEXT = "暂无 token 消耗数据"
+
+# ── Token formatting ────────────────────────────────────────────────────────
+
+TOKEN_DISPLAY_NONE = "—"
+TOKEN_FORMAT_THOUSAND = "K"
+TOKEN_FORMAT_MILLION = "M"
+TOKEN_DISPLAY_SUFFIX = " tokens"
+TOKEN_FONT_SIZE = 8
+
+# ── Skills management ───────────────────────────────────────────────────────
+
+SKILLS_SEARCH_PLACEHOLDER = "搜索 Skills..."
+SKILLS_COUNT_FORMAT = "已启用 {} / {}"
+SKILLS_HINT_TEXT = "更改将在下次启动 Claude Code 时生效"
+
+# ── Model switching ─────────────────────────────────────────────────────────
+
+MODEL_HINT_FORMAT = "已切换至 {}，下次启动 Claude Code 时生效"
+MODEL_NO_CONFIG_HINT = "未检测到 Claude Code 配置"
+MODEL_DEFAULT_LIST = [
+    {"name": "deepseek-v4-flash", "role": "Haiku", "desc": "快速、轻量"},
+    {"name": "deepseek-v4-pro", "role": "Sonnet", "desc": "均衡性能"},
+    {"name": "deepseek-v4-pro[1m]", "role": "Opus", "desc": "最大上下文 (1M)"},
+]
+
+COLOR_MODEL_ACTIVE_BG = "#e3f2fd"
+COLOR_MODEL_INACTIVE_BG = "#f8f8f8"
+COLOR_MODEL_ROLE_TAG = "#1976d2"
+

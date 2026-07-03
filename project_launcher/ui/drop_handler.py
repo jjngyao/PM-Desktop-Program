@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tkinter as tk
+import uuid
 from tkinter import messagebox
 from typing import List, Optional, TYPE_CHECKING
 
@@ -16,6 +17,7 @@ from constants import (
     WM_DROPFILES, DROP_POLL_INTERVAL_MS, DROP_MAX_FILES,
     DROP_PATH_BUFFER_SIZE, SUBCLASS_ID,
 )
+from app_paths import get_log_path
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -42,6 +44,44 @@ def _extract_dropped_files(hdrop: int) -> List[str]:
         return files
     except Exception:
         return []
+
+
+def _remove_path(path: str) -> None:
+    """Remove a file or directory if it exists."""
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    elif os.path.exists(path):
+        os.remove(path)
+
+
+def _copy_path(src: str, dst: str) -> None:
+    """Copy a file or directory to a destination path."""
+    if os.path.isdir(src):
+        shutil.copytree(src, dst)
+    else:
+        shutil.copy2(src, dst)
+
+
+def _copy_path_preserving_existing(src: str, dst: str, overwrite: bool) -> None:
+    """Copy *src* to *dst* without losing the existing destination on failure."""
+    if not os.path.exists(dst):
+        _copy_path(src, dst)
+        return
+
+    if not overwrite:
+        raise FileExistsError(dst)
+
+    backup = f"{dst}.project_launcher_backup_{uuid.uuid4().hex}"
+    shutil.move(dst, backup)
+    try:
+        _copy_path(src, dst)
+    except OSError:
+        if os.path.exists(dst):
+            _remove_path(dst)
+        shutil.move(backup, dst)
+        raise
+    else:
+        _remove_path(backup)
 
 
 # ── DropHandler ─────────────────────────────────────────────────────────────
@@ -237,7 +277,7 @@ class DropHandler:
             messagebox.showerror(
                 "拖放错误",
                 f"处理拖放文件时出错，详情请查看:\n"
-                f"{os.path.join(os.environ.get('TEMP', '.'), 'project_launcher_dnd_crash.log')}",
+                f"{get_log_path('dnd_crash.log')}",
                 parent=self._main.root,
             )
 
@@ -349,12 +389,7 @@ class DropHandler:
             self._main.root.update_idletasks()
 
             try:
-                if os.path.isdir(src):
-                    if overwrite and os.path.exists(dst):
-                        shutil.rmtree(dst)
-                    shutil.copytree(src, dst)
-                else:
-                    shutil.copy2(src, dst)
+                _copy_path_preserving_existing(src, dst, overwrite)
                 copied += 1
             except (OSError, shutil.SameFileError, PermissionError):
                 failed += 1
@@ -399,10 +434,7 @@ class DropHandler:
         """Log an exception from inside a C callback to a temp file."""
         import traceback
         try:
-            log_path = os.path.join(
-                os.environ.get("TEMP", "."), "project_launcher_dnd_crash.log"
-            )
-            with open(log_path, "a", encoding="utf-8") as f:
+            with open(get_log_path("dnd_crash.log"), "a", encoding="utf-8") as f:
                 f.write(traceback.format_exc() + "\n")
         except Exception:
             pass

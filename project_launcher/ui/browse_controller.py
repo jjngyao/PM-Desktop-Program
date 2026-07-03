@@ -18,6 +18,7 @@ from constants import (
     FONT_SIZE_LARGE, FONT_SIZE_STATUS, MAX_DIR_ENTRIES,
 )
 from ui.widgets import DirectoryEntryFrame, show_error
+from ui.safety_messages import build_delete_confirmation_message
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -173,10 +174,7 @@ class BrowseController:
         item_type = "文件夹" if os.path.isdir(path) else "文件"
         confirmed = messagebox.askyesno(
             "确认删除",
-            f"确定要删除以下{item_type}吗？\n\n"
-            f"📁 {name}\n"
-            f"📂 {path}\n\n"
-            f"此操作不可撤销！",
+            build_delete_confirmation_message(item_type, name, path),
             parent=self._main.root,
         )
         if not confirmed:

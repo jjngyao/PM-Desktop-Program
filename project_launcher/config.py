@@ -87,11 +87,22 @@ def load_config() -> Dict[str, Any]:
     return _backfill(config)
 
 
+def _backup_existing_config(path: str) -> None:
+    """Keep a last-known-good copy before replacing an existing config."""
+    if not os.path.exists(path):
+        return
+    try:
+        shutil.copy2(path, path + '.bak')
+    except OSError:
+        pass
+
+
 def save_config(config: Dict[str, Any]) -> None:
     """Atomically save config to disk."""
     path = get_config_path()
     config_dir = os.path.dirname(path)
     os.makedirs(config_dir, exist_ok=True)
+    _backup_existing_config(path)
 
     try:
         tmp_fd, tmp_path = tempfile.mkstemp(dir=config_dir, suffix='.tmp')

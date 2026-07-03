@@ -21,6 +21,7 @@ class ProjectInfo:
     has_git: bool = False
     has_readme: bool = False
     hidden: bool = False
+    token_count: int = 0  # populated by token_scanner (Phase 2)
 
 
 @dataclass

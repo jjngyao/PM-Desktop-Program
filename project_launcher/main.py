@@ -11,13 +11,12 @@ Usage:
 import sys
 import os
 
+from app_paths import get_log_path
+
 # Redirect stderr on frozen builds (no console window)
 if getattr(sys, 'frozen', False):
-    log_dir = os.path.join(os.environ.get('TEMP', os.path.expanduser('~')), 'ProjectLauncher')
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, 'error.log')
     try:
-        sys.stderr = open(log_path, 'a', encoding='utf-8')
+        sys.stderr = open(get_log_path('error.log'), 'a', encoding='utf-8')
     except OSError:
         pass
 
@@ -31,7 +30,7 @@ def main():
         # Last-resort error logging
         try:
             with open(
-                os.path.join(os.environ.get('TEMP', '.'), 'project_launcher_crash.log'),
+                get_log_path('crash.log'),
                 'a', encoding='utf-8',
             ) as crash_log:
                 import traceback, datetime

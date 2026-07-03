@@ -13,6 +13,8 @@ from constants import (
     FONT_SIZE_ICON,
     TIME_JUST_NOW, TIME_MINUTES_AGO, TIME_HOURS_AGO,
     TIME_YESTERDAY, TIME_DAYS_AGO, TIME_WEEKS_AGO,
+    TOKEN_DISPLAY_NONE, TOKEN_DISPLAY_SUFFIX, TOKEN_FONT_SIZE,
+    TOKEN_FORMAT_THOUSAND, TOKEN_FORMAT_MILLION,
 )
 
 
@@ -142,6 +144,14 @@ class ProjectItemFrame(ttk.Frame):
         )
         self.path_label.pack(fill=tk.X)
 
+        self.token_label = tk.Label(
+            text_frame, text=self._format_tokens(self.project.token_count),
+            font=(FONT_FAMILY, TOKEN_FONT_SIZE),
+            fg=COLOR_TEXT_TERTIARY, bg=self.COLOR_BG,
+            anchor="w", cursor="hand2",
+        )
+        self.token_label.pack(fill=tk.X)
+
         time_str = self._format_time(self.project.last_modified)
         self.time_label = tk.Label(
             self, text=time_str,
@@ -157,7 +167,7 @@ class ProjectItemFrame(ttk.Frame):
     def _bind_events(self):
         """Bind mouse events for hover and click."""
         all_widgets = [self, self.icon_label, self.name_label,
-                       self.path_label, self.time_label]
+                       self.path_label, self.token_label, self.time_label]
         for child in self.winfo_children():
             if isinstance(child, tk.Frame):
                 all_widgets.append(child)
@@ -195,6 +205,24 @@ class ProjectItemFrame(ttk.Frame):
         except (OSError, ValueError):
             return ""
 
+    @staticmethod
+    def _format_tokens(count: int) -> str:
+        """Format a token count into a compact display string.
+
+        Args:
+            count: raw token count
+
+        Returns:
+            Formatted string like '1.9M tokens', '293K tokens', or '—'.
+        """
+        if count <= 0:
+            return TOKEN_DISPLAY_NONE
+        if count >= 1_000_000:
+            return f"{count / 1_000_000:.1f}{TOKEN_FORMAT_MILLION}{TOKEN_DISPLAY_SUFFIX}"
+        if count >= 1_000:
+            return f"{count / 1_000:.0f}{TOKEN_FORMAT_THOUSAND}{TOKEN_DISPLAY_SUFFIX}"
+        return f"{count}{TOKEN_DISPLAY_SUFFIX}"
+
     def _on_enter(self, event):
         if not self._hovering:
             self._hovering = True
@@ -220,6 +248,7 @@ class ProjectItemFrame(ttk.Frame):
         yield self.icon_label
         yield self.name_label
         yield self.path_label
+        yield self.token_label
         yield self.time_label
         for child in self.winfo_children():
             if isinstance(child, tk.Frame):

@@ -21,17 +21,23 @@ from constants import (
     COLOR_TEXT_SECONDARY, COLOR_TEXT_TERTIARY,
     COLOR_TEXT_PLACEHOLDER, FONT_FAMILY,
     FONT_SIZE_STATUS, FONT_SIZE_NORMAL, FONT_SIZE_GEAR,
-    FONT_SIZE_EMPTY, MOUSEWHEEL_DIVISOR,
+    FONT_SIZE_EMPTY, FONT_SIZE_SECTION,
+    MOUSEWHEEL_DIVISOR,
     VIEW_MODE_PROJECTS, VIEW_MODE_DIRECTORY,
+    LEFT_PANEL_DEFAULT_WIDTH, CHART_AREA_DEFAULT_HEIGHT,
 )
 from scanner import ProjectInfo, scan_async
 from launcher import detect_ides, find_ide_by_key, launch, IDEInfo
 from config import save_config
+from app_paths import get_log_path
 from ui.widgets import SearchEntry, ProjectItemFrame, show_error
 from ui.settings_dialog import SettingsDialog
+from ui.left_panel import LeftPanel
+from ui.token_chart import TokenChart
 from ui.browse_controller import BrowseController
 from ui.drop_handler import DropHandler
 from ui.new_folder_dialog import NewFolderDialog
+from ui.safety_messages import build_delete_confirmation_message
 
 
 class MainWindow:
@@ -75,10 +81,11 @@ class MainWindow:
         self.drop = DropHandler(self)
 
         # ── Build layout ────────────────────────────────────────────────
+        # Status bar must pack BEFORE main area so it reserves space at bottom
 
         self._build_toolbar()
-        self._build_project_list()
         self._build_status_bar()
+        self._build_main_area()
 
         # ── Detect IDE ──────────────────────────────────────────────────
 
@@ -138,6 +145,7 @@ class MainWindow:
 
         style.configure("Project.TFrame", background=COLOR_BG_WHITE)
         style.configure("ProjectHover.TFrame", background=COLOR_BG_HOVER)
+        style.configure("LeftPanel.TFrame", background="#f8f8f8")
         style.configure("Accent.TButton", font=(FONT_FAMILY, FONT_SIZE_STATUS))
         style.configure("Gear.TButton", font=(FONT_FAMILY, FONT_SIZE_GEAR), padding=(4, 2))
 
@@ -184,10 +192,54 @@ class MainWindow:
         )
         refresh_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-    def _build_project_list(self):
-        """Build the scrollable project list area."""
-        list_container = ttk.Frame(self.root)
-        list_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
+    def _build_main_area(self):
+        """Build the main area: left panel | right (chart top + list bottom)."""
+        # ── Horizontal split: left panel | right area ───────────────────
+        self._main_pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        self._main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
+
+        # Left panel
+        self.left_panel = LeftPanel(self._main_pane)
+        self._main_pane.add(self.left_panel, weight=0)
+
+        # Right vertical split: chart top | list bottom
+        self._right_pane = ttk.PanedWindow(self._main_pane, orient=tk.VERTICAL)
+        self._main_pane.add(self._right_pane, weight=1)
+
+        # Chart area (top-right)
+        self._chart_frame = self._build_chart_area(self._right_pane)
+        self._right_pane.add(self._chart_frame, weight=0)
+
+        # Project list area (bottom-right)
+        list_container = self._build_project_list_area(self._right_pane)
+        self._right_pane.add(list_container, weight=1)
+
+        # Defer sash positioning until window manager has fully mapped
+        # the window.  Without this, weight=0 panes collapse to 1 px
+        # when a saved window_geometry is restored from config.
+        self.root.after_idle(self._apply_sash_positions)
+
+    def _build_chart_area(self, parent):
+        """Build the token chart area (top-right)."""
+        self.token_chart = TokenChart(parent)
+        return self.token_chart
+
+    def _apply_sash_positions(self):
+        """Set sash positions after window manager has fully mapped the window.
+
+        Called via root.after() to defer until after the geometry restore
+        (from saved window_geometry config) has been processed.  Without this
+        deferral, weight=0 panes collapse to 1 px on large restored windows.
+        """
+        try:
+            self._main_pane.sashpos(0, LEFT_PANEL_DEFAULT_WIDTH)
+            self._right_pane.sashpos(0, CHART_AREA_DEFAULT_HEIGHT)
+        except tk.TclError:
+            pass  # widget destroyed before callback fired
+
+    def _build_project_list_area(self, parent):
+        """Build the scrollable project list area (bottom-right)."""
+        list_container = ttk.Frame(parent)
 
         self.list_canvas = tk.Canvas(
             list_container, bg=COLOR_BG_WHITE, highlightthickness=0,
@@ -212,10 +264,12 @@ class MainWindow:
         self.list_canvas.bind("<Enter>", self._on_canvas_enter)
         self.list_canvas.bind("<Leave>", self._on_canvas_leave)
 
+        return list_container
+
     def _build_status_bar(self):
         """Build the status bar at the bottom."""
         status_frame = ttk.Frame(self.root, padding=(12, 4))
-        status_frame.pack(fill=tk.X)
+        status_frame.pack(fill=tk.X, side=tk.BOTTOM)
 
         ttk.Separator(status_frame, orient="horizontal").pack(fill=tk.X)
 
@@ -444,10 +498,7 @@ class MainWindow:
 
         confirmed = messagebox.askyesno(
             "确认删除",
-            f"确定要删除以下项目吗？\n\n"
-            f"📁 {project.name}\n"
-            f"📂 {project.path}\n\n"
-            f"此操作不可撤销！",
+            build_delete_confirmation_message("项目", project.name, project.path),
             parent=self.root,
         )
         if not confirmed:
@@ -539,10 +590,7 @@ class MainWindow:
         # Enable fault handler for C-level crash diagnostics
         try:
             import faulthandler
-            crash_log = os.path.join(
-                os.environ.get("TEMP", "."), "project_launcher_fault.log",
-            )
-            faulthandler.enable(file=open(crash_log, "a", encoding="utf-8"))
+            faulthandler.enable(file=open(get_log_path("fault.log"), "a", encoding="utf-8"))
         except Exception:
             pass
 
