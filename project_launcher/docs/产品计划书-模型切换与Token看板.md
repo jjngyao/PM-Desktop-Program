@@ -1,8 +1,8 @@
 # 产品计划书：模型切换 & Token 消耗看板
 
-**版本**：v1.2  
-**日期**：2026-07-03  
-**状态**：开发中 — Phase 1 已完成，Phase 1.5 风险底座修复已完成  
+**版本**：v1.5  
+**日期**：2026-07-04  
+**状态**：开发中 — Phase 1/1.5 已完成，Phase 3 模型配置管理已完成一级配置页、编辑/删除入口与初始空状态修正  
 **关联项目**：Project Launcher  
 **开发分支**：third
 
@@ -15,7 +15,7 @@
 | **Phase 1** | 布局重构：左右分栏 + 右侧上下分割 + 左侧面板骨架 + 折线图骨架 + 项目列表 token 列 | ✅ 已完成 (2026-07-01) |
 | **Phase 1.5** | 风险底座修复：配置写入备份、拖放覆盖回滚、日志路径统一、删除确认文案强化、基础安全测试 | ✅ 已完成 (2026-07-03) |
 | **Phase 2** | `token_scanner.py`：数据解析 + 缓存 + 路径映射 | 🔲 待开发 |
-| **Phase 3** | 左侧面板：模型切换功能实现 + settings.json 读写 | 🔲 待开发 |
+| **Phase 3** | 模型配置管理：左侧入口 + 一级配置页 + 新建/编辑/删除 + Claude Code settings 预览 + settings.json 写入 | 🟡 开发中 |
 | **Phase 4** | 左侧面板：Skills 管理功能 + `skill_manager.py` + 启用/禁用 | 🔲 待开发 |
 | **Phase 5** | 右上折线图：Canvas 手绘 + 日/周切换 + hover | 🔲 待开发 |
 | **Phase 6** | 项目列表 token 列数据联通 | 🔲 待开发 |
@@ -66,6 +66,71 @@
 **验证结果：**
 - `python -m unittest tests.test_config_safety tests.test_drop_handler_safety tests.test_app_paths tests.test_safety_messages` 通过（4 个测试）
 
+### Phase 3 当前进展（模型配置管理）
+
+**已完成（2026-07-03）：**
+- 新增 `model_profiles.py` 数据层：
+  - `ModelProfile`：表示一套模型供应商配置
+  - `ModelMapping`：表示 Claude Code 角色到实际模型的映射
+  - `build_claude_settings()`：将模型配置合并为 Claude Code `settings.json` 结构，同时保留已有未知字段
+  - `mask_secret()`：JSON 预览中对 API Key 做掩码，避免泄露
+  - 初始模型配置列表为空，不自动生成 DeepSeek 或任何默认供应商
+  - `profile_to_summary()`：导出不包含 API Key 的配置摘要，新增配置默认 `is_active = false`
+  - `validate_profile()`：保存前校验名称、API Key、请求地址、默认兜底模型和模型映射完整性
+- 新增 `ui/model_profile_dialog.py`：
+  - API Key 输入框，默认掩码，可手动显示/隐藏
+  - 请求地址、API 格式、认证字段
+  - Sonnet / Opus / Fable / Haiku 模型映射
+  - 默认兜底模型、自定义 User-Agent
+  - 配置 JSON 实时预览，预览中 API Key 已掩码
+  - 新建弹窗默认字段为空；仅保留 Sonnet / Opus / Fable / Haiku 角色行，不预填模型值
+  - 空字段不写入 JSON 预览的 `env`
+- 修改 `ui/left_panel.py`：
+  - 在左侧模型区增加“模型配置...”入口
+  - 左侧模型区初始显示“暂无模型配置”
+  - 用户创建配置后仅显示配置名称 + 状态灯；未启用为红色，启用后为绿色
+- 修改 `ui/main_window.py`：
+  - 接入模型配置弹窗
+  - 保存时暂只写入非敏感摘要到应用配置，不持久化 API Key
+  - 保存后刷新左侧模型配置列表
+- 新增 `tests/test_model_profiles.py`：
+  - 覆盖 Claude Code settings 合并逻辑
+  - 覆盖 API Key 掩码预览
+  - 覆盖空 profile 不写入默认 env、摘要不含 API Key、保存校验、新建配置默认未启用
+
+**已完成（2026-07-04）：**
+- 新增 `ui/model_profiles_page.py`：
+  - “模型配置...”入口不再直接打开二级表单，而是进入一级模型配置页面
+  - 一级页面右上角提供 `+` 新建按钮，点击后复用现有模型配置弹窗
+  - 已保存配置在一级页面中显示配置名称、编辑按钮、删除按钮和启用状态灯
+  - 删除配置前弹出确认对话框，避免误删
+- 修改 `ui/main_window.py`：
+  - 左侧入口改为打开一级模型配置页面
+  - 新增模型后刷新一级页面和左侧模型列表
+  - 编辑模型时从非敏感摘要恢复可编辑配置，并保留原启用状态
+  - 删除模型后同步刷新一级页面和左侧模型列表
+  - 点击启动按钮后切换当前配置的启用/停止状态；启动时将其他配置标记为未启用，停止时当前配置状态灯变红
+- 修改 `ui/left_panel.py`：
+  - 左侧模型列表在状态灯旁新增双态启动按钮：未启用显示三角形，已启用显示两根竖直长方形
+  - 点击按钮后刷新左侧状态灯和按钮图标
+- 修改 `ui/model_profile_dialog.py`：
+  - 编辑已有配置时回填模型映射行；未配置角色仍保留为空行
+- 修改 `model_profiles.py`：
+  - 新增 `profile_from_summary()`，用于从不含 API Key 的应用配置摘要恢复编辑表单
+  - 新增 `set_active_profile()` / `toggle_active_profile()`，保证同一时间最多只有一个模型配置处于启用状态，并支持停止当前配置
+- 风险点解决情况：
+  - “默认预置模型误导用户”已处理：初始列表为空，仅用户保存后显示
+  - “点击模型配置直接进入二级弹窗”已处理：已改为一级页面 + 右上角新建
+  - “缺少编辑/删除/启动入口”已处理：一级页面提供铅笔编辑和垃圾桶删除；左侧主页面提供三角形启动
+  - “误删配置风险”已处理：删除前增加确认对话框
+  - “API Key 明文持久化风险”仍保持规避：应用配置摘要不保存 API Key
+
+**待完成：**
+- 设计 API Key 的安全存储策略；在策略确认前，不把 API Key 明文写入应用配置
+- 增加“应用到 Claude Code”动作，写入 `~/.claude/settings.json` 前必须备份并使用原子替换
+- 增加“管理与测速”能力
+- 将当前“启动”动作从应用内状态切换升级为实际写入 Claude Code settings
+
 ---
 
 ## 一、概述
@@ -93,54 +158,113 @@
 
 ## 二、功能详情
 
-### 2.1 模型切换（左侧面板）
+### 2.1 模型配置管理（左侧面板）
 
 #### 2.1.1 功能描述
 
-在应用界面左侧提供一个模型选择面板，列出所有可用的 AI 模型，用户点击即可切换。
+在应用界面左侧提供模型配置入口。初始状态下不展示任何默认模型；只有用户创建模型供应商配置后，主界面才显示该配置。
+
+主界面模型区只展示配置名称和启用状态灯：
+
+| 状态 | 展示 |
+|------|------|
+| 无配置 | `暂无模型配置` |
+| 已创建未启用 | `DeepSeek` + 红色状态灯 |
+| 已应用到 Claude Code | `DeepSeek` + 绿色状态灯 |
+
+API Key、请求地址、模型映射、默认兜底模型等细节只在模型配置页或新建/编辑弹窗中展示。
 
 #### 2.1.2 交互流程
 
 ```
-用户点击模型选项 → 写入 ~/.claude/settings.json → 提示"下次启动 Claude Code 生效"
+用户点击“模型配置...” → 进入模型配置页 → 点击右上角 + → 弹出新建模型配置弹窗
+  → 用户填写厂商名称、API Key、URL、模型映射 → 保存
+  → 左侧主界面显示配置名称 + 红色状态灯
+  → 用户点击“应用到 Claude Code”
+  → 备份并写入 ~/.claude/settings.json
+  → 当前配置状态灯变绿色，其他配置变红色
 ```
 
 #### 2.1.3 数据来源
 
-`~/.claude/settings.json` 中的 `env` 字段：
+应用自身配置中保存非敏感模型配置摘要，默认初始为空：
+
+```json
+{
+  "model_profiles": []
+}
+```
+
+用户创建配置后保存：
+
+```json
+{
+  "model_profiles": [
+    {
+      "name": "DeepSeek",
+      "base_url": "https://api.deepseek.com/anthropic",
+      "api_format": "Anthropic Messages (原生)",
+      "auth_field": "ANTHROPIC_AUTH_TOKEN",
+      "default_model": "deepseek-v4-pro[1m]",
+      "is_active": false,
+      "mappings": [
+        {
+          "role": "Sonnet",
+          "display_name": "deepseek-v4-pro",
+          "request_model": "deepseek-v4-pro",
+          "supports_1m": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+第一版不在普通应用配置中明文持久化 API Key。API Key 在输入框和 JSON 预览中均默认掩码，后续需补安全存储策略。
+
+应用到 Claude Code 时，写入 `~/.claude/settings.json` 中的 `env` 字段：
 
 | 配置键 | 含义 | 示例值 |
 |--------|------|--------|
+| `ANTHROPIC_AUTH_TOKEN` | 认证 token | `sk-********cdef` |
 | `ANTHROPIC_MODEL` | 当前使用的模型 | `deepseek-v4-pro[1m]` |
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | 默认 Haiku 模型 | `deepseek-v4-flash` |
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | 默认 Opus 模型 | `deepseek-v4-pro[1m]` |
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | 默认 Sonnet 模型 | `deepseek-v4-pro` |
 | `ANTHROPIC_BASE_URL` | API 端点 | `https://api.deepseek.com/anthropic` |
 
-#### 2.1.4 可切换的模型列表
+#### 2.1.4 模型映射
 
-根据当前 settings.json 分析，可用模型包括：
+模型映射由用户创建配置时填写。系统固定提供 Claude Code 角色行，但不预填具体模型值：
 
-| 模型名称 | 角色 | 特点 |
-|----------|------|------|
-| `deepseek-v4-flash` | Haiku | 快速、轻量 |
-| `deepseek-v4-pro` | Sonnet | 均衡性能 |
-| `deepseek-v4-pro[1m]` | Opus | 最大上下文 (1M) |
+| 模型角色 | 显示名称 | 实际请求模型 | 声明支持 1M |
+|----------|----------|--------------|--------------|
+| Sonnet | 用户填写 | 用户填写 | 用户勾选 |
+| Opus | 用户填写 | 用户填写 | 用户勾选 |
+| Fable | 用户填写 | 用户填写 | 用户勾选 |
+| Haiku | 用户填写 | 用户填写 | 用户勾选 |
 
 #### 2.1.5 UI 规格
 
-- 以单选列表（RadioButton 样式）展示模型列表
-- 当前激活的模型高亮显示
-- 每个模型项显示：模型名称 + 角色标签（Haiku / Sonnet / Opus）
-- 切换后底部显示提示文字："已切换至 xxx，下次启动 Claude Code 时生效"
+- 主界面左侧模型区只显示配置名称 + 状态灯
+- 状态灯绿色表示已应用到 Claude Code，红色表示未应用
+- 无配置时显示空状态：“暂无模型配置”
+- “模型配置...”按钮进入配置管理页
+- 配置管理页右上角提供圆形 `+` 新建按钮
+- 新建按钮在当前页面中央弹出模型配置对话框
+- 对话框包含 API Key、请求地址、API 格式、认证字段、模型映射、默认兜底模型、User-Agent 和配置 JSON 预览
+- JSON 预览中 API Key 必须掩码，空字段不写入 `env`
 
 #### 2.1.6 边界情况
 
 | 场景 | 处理方式 |
 |------|----------|
-| settings.json 不存在 | 显示"未检测到 Claude Code 配置"，隐藏模型面板 |
-| settings.json 格式异常 | 显示错误提示，提供默认模型列表 |
-| 写入 settings.json 失败 | 显示错误对话框，保持原有选择 |
+| 没有模型配置 | 左侧显示“暂无模型配置”，不显示任何默认模型 |
+| 用户未填写必填字段 | 弹窗不关闭，显示明确错误 |
+| API Key 未有安全存储策略 | 不写入普通应用配置，仅在当前编辑流程中使用 |
+| settings.json 不存在 | 应用动作可创建配置文件，写入前提示并备份父目录状态 |
+| settings.json 格式异常 | 显示错误提示，不写入 |
+| 写入 settings.json 失败 | 显示错误对话框，保持 `is_active` 不变 |
 | Claude Code 正在运行中 | 正常写入配置，提示用户重启 CLI 生效 |
 
 ---
@@ -647,7 +771,7 @@ class TokenChart(tk.Canvas):
 | **Phase 1** | 布局重构：左右分栏 + 右侧上下分割 + 左侧面板骨架 + 折线图骨架 + 项目列表 token 列 | 中 | ✅ 已完成 |
 | **Phase 1.5** | 风险底座修复：配置备份、覆盖回滚、日志路径统一、删除确认文案、安全测试 | 小 | ✅ 已完成 |
 | **Phase 2** | `token_scanner.py`：数据解析 + 缓存 + 路径映射 | 中 | 🔲 待开发 |
-| **Phase 3** | 左侧面板：模型切换功能 + settings.json 读写 | 小 | 🔲 待开发 |
+| **Phase 3** | 模型配置管理：左侧入口、配置弹窗、JSON 预览、settings.json 写入 | 中 | 🟡 开发中 |
 | **Phase 4** | 左侧面板：Skills 管理功能 + `skill_manager.py` + 启用/禁用 | 中 | 🔲 待开发 |
 | **Phase 5** | 右上折线图：Canvas 手绘 + 日/周切换 + hover | 中 | 🔲 待开发 |
 | **Phase 6** | 项目列表 token 列 + 数据联通 | 小 | 🔲 待开发 |
@@ -662,6 +786,7 @@ class TokenChart(tk.Canvas):
 | JSONL 文件体积大（单文件可达 1MB+） | 扫描慢 | 缓存 + 增量更新 |
 | settings.json / 应用配置写入失败或被覆盖 | 配置损坏、用户配置丢失 | ✅ 已缓解：应用配置保存前创建 `.bak` 备份；后续 Claude Code settings 写入沿用同一策略 |
 | Skills 目录移动失败（权限/占用） | 启用/禁用不生效 | 操作前校验权限，失败时回弹 UI + 错误提示 |
+| API Key 泄露 | 凭据泄露、供应商账号风险 | 🟡 部分缓解：弹窗输入默认掩码、JSON 预览掩码；暂不持久化 API Key。后续需接入安全存储或明确加密/本机保存策略 |
 | 拖放覆盖目录过程中复制失败 | 原目录被删除或半覆盖 | ✅ 已缓解：覆盖前移动旧目标到临时备份，失败时恢复，成功后清理备份 |
 | 删除项目/文件夹/文件误操作 | 用户数据不可恢复 | ✅ 已缓解：删除确认文案明确“直接从磁盘删除，不会进入回收站”，并要求确认路径 |
 | 崩溃日志路径分散 | 排障困难 | ✅ 已缓解：统一写入 `%TEMP%\ProjectLauncher\` |

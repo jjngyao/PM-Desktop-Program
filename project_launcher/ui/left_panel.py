@@ -11,14 +11,15 @@ from typing import List, Dict, Any, Optional, Callable
 
 from constants import (
     COLOR_BG_LEFT_PANEL, COLOR_SECTION_HEADER, COLOR_SECTION_BORDER,
-    COLOR_BG_WHITE, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY,
+    COLOR_BG_WHITE, COLOR_BG_HOVER, COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY,
     COLOR_TEXT_TERTIARY, COLOR_TEXT_PLACEHOLDER,
     COLOR_MODEL_ACTIVE_BG, COLOR_MODEL_INACTIVE_BG, COLOR_MODEL_ROLE_TAG,
+    COLOR_GIT_GREEN,
     FONT_FAMILY, FONT_SIZE_SECTION, FONT_SIZE_SMALL, FONT_SIZE_NORMAL,
     FONT_SIZE_STATUS,
     LEFT_PANEL_DEFAULT_WIDTH, LEFT_PANEL_MIN_WIDTH,
     SKILLS_SEARCH_PLACEHOLDER, SKILLS_COUNT_FORMAT, SKILLS_HINT_TEXT,
-    MODEL_HINT_FORMAT, MODEL_NO_CONFIG_HINT, MODEL_DEFAULT_LIST,
+    MODEL_HINT_FORMAT, MODEL_NO_CONFIG_HINT,
     MOUSEWHEEL_DIVISOR,
 )
 
@@ -193,6 +194,8 @@ class LeftPanel(ttk.Frame):
         self._skill_vars: Dict[str, tk.BooleanVar] = {}
         self._active_model_name: str = ""
         self._model_select_callback: Optional[Callable] = None
+        self._model_settings_callback: Optional[Callable] = None
+        self._model_activate_callback: Optional[Callable] = None
 
         # ── Scrollable canvas ───────────────────────────────────────────
         self._canvas = tk.Canvas(
@@ -226,7 +229,7 @@ class LeftPanel(ttk.Frame):
         self.skills_section.pack(fill=tk.X)
 
         # ── Build initial UI with default data ──────────────────────────
-        self._build_model_section(MODEL_DEFAULT_LIST, active_name="deepseek-v4-pro")
+        self._build_model_profiles_section([])
         self._build_skills_section(self._default_skills())
 
     # ── Scroll handling ─────────────────────────────────────────────────
@@ -249,6 +252,70 @@ class LeftPanel(ttk.Frame):
         self._canvas.yview_scroll(-1 * (event.delta // MOUSEWHEEL_DIVISOR), "units")
 
     # ── Model section ───────────────────────────────────────────────────
+
+    def _build_model_profiles_section(self, profiles: list):
+        """Build the model profile list: name + active status indicator."""
+        section = self.model_section
+        section.hide_placeholder()
+        section.clear_content()
+        self._model_rows.clear()
+
+        if not profiles:
+            empty = tk.Label(
+                section.content_frame,
+                text="暂无模型配置",
+                font=(FONT_FAMILY, FONT_SIZE_NORMAL),
+                fg=COLOR_TEXT_TERTIARY,
+                bg=COLOR_BG_LEFT_PANEL,
+                anchor="w",
+            )
+            empty.pack(fill=tk.X, padx=8, pady=(6, 8))
+        else:
+            for index, profile in enumerate(profiles):
+                row = tk.Frame(section.content_frame, bg=COLOR_BG_LEFT_PANEL)
+                row.pack(fill=tk.X, padx=8, pady=4)
+                name = tk.Label(
+                    row,
+                    text=profile.get("name", "未命名配置"),
+                    font=(FONT_FAMILY, FONT_SIZE_NORMAL),
+                    fg=COLOR_TEXT_PRIMARY,
+                    bg=COLOR_BG_LEFT_PANEL,
+                    anchor="w",
+                )
+                name.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                active = bool(profile.get("is_active", False))
+                status = tk.Label(
+                    row,
+                    text="●",
+                    font=(FONT_FAMILY, FONT_SIZE_NORMAL),
+                    fg=COLOR_GIT_GREEN if active else "#d1242f",
+                    bg=COLOR_BG_LEFT_PANEL,
+                    anchor="e",
+                )
+                status.pack(side=tk.RIGHT)
+                activate_btn = tk.Button(
+                    row,
+                    text="Ⅱ" if active else "▶",
+                    font=(FONT_FAMILY, FONT_SIZE_STATUS),
+                    fg=COLOR_TEXT_SECONDARY,
+                    bg=COLOR_BG_LEFT_PANEL,
+                    activebackground=COLOR_BG_HOVER,
+                    bd=0,
+                    cursor="hand2",
+                    command=lambda idx=index: self._on_model_activate(idx),
+                )
+                activate_btn.pack(side=tk.RIGHT, padx=(0, 6))
+
+        settings_btn = tk.Button(
+            section.content_frame,
+            text="模型配置...",
+            font=(FONT_FAMILY, FONT_SIZE_NORMAL),
+            bg=COLOR_BG_WHITE,
+            bd=0,
+            cursor="hand2",
+            command=self._on_model_settings,
+        )
+        settings_btn.pack(fill=tk.X, padx=8, pady=(8, 4), ipady=4)
 
     def _build_model_section(self, models: list, active_name: str = ""):
         """Build the model switching radio-button list.
@@ -288,6 +355,17 @@ class LeftPanel(ttk.Frame):
         )
         self._model_hint.pack(fill=tk.X, padx=8, pady=(6, 4))
 
+        settings_btn = tk.Button(
+            section.content_frame,
+            text="模型配置...",
+            font=(FONT_FAMILY, FONT_SIZE_NORMAL),
+            bg=COLOR_BG_WHITE,
+            bd=0,
+            cursor="hand2",
+            command=self._on_model_settings,
+        )
+        settings_btn.pack(fill=tk.X, padx=8, pady=(4, 4), ipady=4)
+
     def _on_model_select(self, name: str):
         """Handle model selection — update highlighting and hint."""
         self._active_model_name = name
@@ -298,6 +376,16 @@ class LeftPanel(ttk.Frame):
 
         if self._model_select_callback:
             self._model_select_callback(name)
+
+    def _on_model_settings(self):
+        """Open the model settings page/dialog."""
+        if self._model_settings_callback:
+            self._model_settings_callback()
+
+    def _on_model_activate(self, index: int):
+        """Activate a saved model profile."""
+        if self._model_activate_callback:
+            self._model_activate_callback(index)
 
     # ── Skills section ──────────────────────────────────────────────────
 
@@ -460,6 +548,10 @@ class LeftPanel(ttk.Frame):
         """
         self._build_model_section(models, active_name=active_name)
 
+    def set_model_profiles(self, profiles: list):
+        """Populate the model profile section."""
+        self._build_model_profiles_section(profiles)
+
     def set_skills_list(self, skills: list):
         """Populate the Skills management section. (Phase 4)
 
@@ -479,3 +571,11 @@ class LeftPanel(ttk.Frame):
     def set_model_select_callback(self, callback: Callable):
         """Set callback for model selection changes. (Phase 3)"""
         self._model_select_callback = callback
+
+    def set_model_settings_callback(self, callback: Callable):
+        """Set callback for opening the model settings UI."""
+        self._model_settings_callback = callback
+
+    def set_model_activate_callback(self, callback: Callable):
+        """Set callback for activating a model profile."""
+        self._model_activate_callback = callback

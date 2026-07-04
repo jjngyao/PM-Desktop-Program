@@ -37,7 +37,10 @@ from ui.token_chart import TokenChart
 from ui.browse_controller import BrowseController
 from ui.drop_handler import DropHandler
 from ui.new_folder_dialog import NewFolderDialog
+from ui.model_profile_dialog import ModelProfileDialog
+from ui.model_profiles_page import ModelProfilesPage
 from ui.safety_messages import build_delete_confirmation_message
+from model_profiles import profile_from_summary, profile_to_summary, toggle_active_profile
 
 
 class MainWindow:
@@ -86,6 +89,11 @@ class MainWindow:
         self._build_toolbar()
         self._build_status_bar()
         self._build_main_area()
+        self.left_panel.set_model_settings_callback(self._open_model_profiles_page)
+        self.left_panel.set_model_activate_callback(
+            lambda index: self._activate_model_profile(index, self.root)
+        )
+        self.left_panel.set_model_profiles(self.config.get("model_profiles", []))
 
         # ── Detect IDE ──────────────────────────────────────────────────
 
@@ -543,7 +551,74 @@ class MainWindow:
 
         NewFolderDialog(self.root, on_created=on_created, default_path=default_path)
 
+    def _model_profiles(self) -> List[Dict[str, Any]]:
+        return self.config.setdefault("model_profiles", [])
+
+    def _save_model_profiles(self) -> List[Dict[str, Any]]:
+        profiles = self._model_profiles()
+        save_config(self.config)
+        self.left_panel.set_model_profiles(profiles)
+        return profiles
+
+    def _open_model_profiles_page(self):
+        """Open the first-level model profile management page."""
+        ModelProfilesPage(
+            self.root,
+            self._model_profiles(),
+            on_add=self._add_model_profile,
+            on_edit=self._edit_model_profile,
+            on_delete=self._delete_model_profile,
+        )
+
+    def _add_model_profile(self, parent) -> List[Dict[str, Any]]:
+        dialog = ModelProfileDialog(parent)
+        if dialog.result is None:
+            return self._model_profiles()
+
+        profiles = self._model_profiles()
+        profiles.append(profile_to_summary(dialog.result))
+        self.status_label.config(text=f"已保存模型配置: {dialog.result.name}")
+        return self._save_model_profiles()
+
+    def _edit_model_profile(self, index: int, parent) -> List[Dict[str, Any]]:
+        profiles = self._model_profiles()
+        if index < 0 or index >= len(profiles):
+            return profiles
+
+        previous = profiles[index]
+        dialog = ModelProfileDialog(parent, profile_from_summary(previous))
+        if dialog.result is None:
+            return profiles
+
+        summary = profile_to_summary(dialog.result)
+        summary["is_active"] = bool(previous.get("is_active", False))
+        profiles[index] = summary
+        self.status_label.config(text=f"已更新模型配置: {dialog.result.name}")
+        return self._save_model_profiles()
+
+    def _delete_model_profile(self, index: int, parent) -> List[Dict[str, Any]]:
+        profiles = self._model_profiles()
+        if index < 0 or index >= len(profiles):
+            return profiles
+
+        name = str(profiles[index].get("name", ""))
+        del profiles[index]
+        self.status_label.config(text=f"已删除模型配置: {name}")
+        return self._save_model_profiles()
+
     # ── Settings ────────────────────────────────────────────────────────────
+
+    def _activate_model_profile(self, index: int, parent) -> List[Dict[str, Any]]:
+        profiles = self._model_profiles()
+        if index < 0 or index >= len(profiles):
+            return profiles
+
+        was_active = bool(profiles[index].get("is_active", False))
+        toggle_active_profile(profiles, index)
+        name = str(profiles[index].get("name", ""))
+        action = "已停止" if was_active else "已启动"
+        self.status_label.config(text=f"{action}模型配置: {name}")
+        return self._save_model_profiles()
 
     def _open_settings(self):
         """Open the settings dialog."""
