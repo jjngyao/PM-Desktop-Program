@@ -75,7 +75,7 @@ class ModelProfileTests(unittest.TestCase):
         self.assertTrue(all(mapping.request_model == "" for mapping in roles))
         self.assertTrue(all(mapping.supports_1m is False for mapping in roles))
 
-    def test_profile_summary_does_not_include_api_key_and_defaults_inactive(self):
+    def test_profile_summary_persists_api_key_and_defaults_inactive(self):
         profile = ModelProfile(
             name="DeepSeek",
             api_key="sk-secret-token",
@@ -88,10 +88,9 @@ class ModelProfileTests(unittest.TestCase):
 
         self.assertEqual(summary["name"], "DeepSeek")
         self.assertFalse(summary["is_active"])
-        self.assertNotIn("api_key", summary)
-        self.assertNotIn("sk-secret-token", str(summary))
+        self.assertEqual(summary["api_key"], "sk-secret-token")
 
-    def test_profile_summary_can_restore_editable_profile_without_api_key(self):
+    def test_profile_summary_can_restore_editable_profile_with_api_key(self):
         profile = ModelProfile(
             name="DeepSeek",
             api_key="sk-secret-token",
@@ -108,7 +107,7 @@ class ModelProfileTests(unittest.TestCase):
         restored = profile_from_summary(profile_to_summary(profile))
 
         self.assertEqual(restored.name, "DeepSeek")
-        self.assertEqual(restored.api_key, "")
+        self.assertEqual(restored.api_key, "sk-secret-token")
         self.assertEqual(restored.base_url, "https://api.deepseek.com/anthropic")
         self.assertEqual(restored.default_model, "deepseek-v4-pro[1m]")
         self.assertEqual(restored.user_agent, "Mozilla/5.0")

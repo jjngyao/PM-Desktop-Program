@@ -57,14 +57,51 @@ class ModelProfileDialog:
         )
         ttk.Button(header, text="保存", command=self._on_save).pack(side=tk.RIGHT)
 
-        body = ttk.Frame(outer)
-        body.pack(fill=tk.BOTH, expand=True)
+        body_shell = ttk.Frame(outer)
+        body_shell.pack(fill=tk.BOTH, expand=True)
+
+        self._body_canvas = tk.Canvas(body_shell, highlightthickness=0)
+        body_scrollbar = ttk.Scrollbar(
+            body_shell,
+            orient=tk.VERTICAL,
+            command=self._body_canvas.yview,
+        )
+        self._body_canvas.configure(yscrollcommand=body_scrollbar.set)
+
+        body_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._body_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        body = ttk.Frame(self._body_canvas)
+        self._body_window = self._body_canvas.create_window(
+            (0, 0),
+            window=body,
+            anchor="nw",
+        )
+        body.bind("<Configure>", self._on_body_configure)
+        self._body_canvas.bind("<Configure>", self._on_body_canvas_configure)
+        self._body_canvas.bind("<Enter>", self._bind_mousewheel)
+        self._body_canvas.bind("<Leave>", self._unbind_mousewheel)
 
         self._build_basic_section(body)
         self._build_format_section(body)
         self._build_mapping_section(body)
         self._build_advanced_section(body)
         self._build_preview_section(body)
+
+    def _on_body_configure(self, event) -> None:
+        self._body_canvas.configure(scrollregion=self._body_canvas.bbox("all"))
+
+    def _on_body_canvas_configure(self, event) -> None:
+        self._body_canvas.itemconfig(self._body_window, width=event.width)
+
+    def _bind_mousewheel(self, event) -> None:
+        self._dialog.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _unbind_mousewheel(self, event) -> None:
+        self._dialog.unbind_all("<MouseWheel>")
+
+    def _on_mousewheel(self, event) -> None:
+        self._body_canvas.yview_scroll(-1 * (event.delta // 120), "units")
 
     def _build_basic_section(self, parent) -> None:
         self.name_var = tk.StringVar()

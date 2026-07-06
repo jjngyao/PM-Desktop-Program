@@ -1,8 +1,8 @@
 # 产品计划书：模型切换 & Token 消耗看板
 
-**版本**：v1.5  
-**日期**：2026-07-04  
-**状态**：开发中 — Phase 1/1.5 已完成，Phase 3 模型配置管理已完成一级配置页、编辑/删除入口与初始空状态修正  
+**版本**：v1.7  
+**日期**：2026-07-06  
+**状态**：开发中 — Phase 1/1.5 已完成，Phase 3 模型配置管理已验收完成  
 **关联项目**：Project Launcher  
 **开发分支**：third
 
@@ -15,7 +15,7 @@
 | **Phase 1** | 布局重构：左右分栏 + 右侧上下分割 + 左侧面板骨架 + 折线图骨架 + 项目列表 token 列 | ✅ 已完成 (2026-07-01) |
 | **Phase 1.5** | 风险底座修复：配置写入备份、拖放覆盖回滚、日志路径统一、删除确认文案强化、基础安全测试 | ✅ 已完成 (2026-07-03) |
 | **Phase 2** | `token_scanner.py`：数据解析 + 缓存 + 路径映射 | 🔲 待开发 |
-| **Phase 3** | 模型配置管理：左侧入口 + 一级配置页 + 新建/编辑/删除 + Claude Code settings 预览 + settings.json 写入 | 🟡 开发中 |
+| **Phase 3** | 模型配置管理：左侧入口 + 一级配置页 + 新建/编辑/删除 + Claude Code settings 预览 + settings.json 写入 | ✅ 已验收 (2026-07-05) |
 | **Phase 4** | 左侧面板：Skills 管理功能 + `skill_manager.py` + 启用/禁用 | 🔲 待开发 |
 | **Phase 5** | 右上折线图：Canvas 手绘 + 日/周切换 + hover | 🔲 待开发 |
 | **Phase 6** | 项目列表 token 列数据联通 | 🔲 待开发 |
@@ -75,7 +75,7 @@
   - `build_claude_settings()`：将模型配置合并为 Claude Code `settings.json` 结构，同时保留已有未知字段
   - `mask_secret()`：JSON 预览中对 API Key 做掩码，避免泄露
   - 初始模型配置列表为空，不自动生成 DeepSeek 或任何默认供应商
-  - `profile_to_summary()`：导出不包含 API Key 的配置摘要，新增配置默认 `is_active = false`
+  - `profile_to_summary()`：导出模型配置摘要；个人工具 MVP 阶段允许保存 API Key，但所有 UI 与预览默认掩码
   - `validate_profile()`：保存前校验名称、API Key、请求地址、默认兜底模型和模型映射完整性
 - 新增 `ui/model_profile_dialog.py`：
   - API Key 输入框，默认掩码，可手动显示/隐藏
@@ -91,12 +91,12 @@
   - 用户创建配置后仅显示配置名称 + 状态灯；未启用为红色，启用后为绿色
 - 修改 `ui/main_window.py`：
   - 接入模型配置弹窗
-  - 保存时暂只写入非敏感摘要到应用配置，不持久化 API Key
+  - 保存模型配置时写入本项目配置；API Key 可用于后续直接启动，不需要重复输入
   - 保存后刷新左侧模型配置列表
 - 新增 `tests/test_model_profiles.py`：
   - 覆盖 Claude Code settings 合并逻辑
   - 覆盖 API Key 掩码预览
-  - 覆盖空 profile 不写入默认 env、摘要不含 API Key、保存校验、新建配置默认未启用
+  - 覆盖空 profile 不写入默认 env、摘要保存 API Key、保存校验、新建配置默认未启用
 
 **已完成（2026-07-04）：**
 - 新增 `ui/model_profiles_page.py`：
@@ -116,20 +116,46 @@
 - 修改 `ui/model_profile_dialog.py`：
   - 编辑已有配置时回填模型映射行；未配置角色仍保留为空行
 - 修改 `model_profiles.py`：
-  - 新增 `profile_from_summary()`，用于从不含 API Key 的应用配置摘要恢复编辑表单
+  - 新增 `profile_from_summary()`，用于从应用配置摘要恢复编辑表单，包含已保存 API Key
   - 新增 `set_active_profile()` / `toggle_active_profile()`，保证同一时间最多只有一个模型配置处于启用状态，并支持停止当前配置
+- 新增 `claude_settings.py`：
+  - 启动模型时读取现有 `~/.claude/settings.json`，保留未知字段并合并模型配置
+  - 写入前创建 `.bak` 备份，并使用临时文件 + 原子替换写入
+  - 停止模型时仅移除本工具管理的 Claude Code 环境变量，保留其他用户配置
 - 风险点解决情况：
   - “默认预置模型误导用户”已处理：初始列表为空，仅用户保存后显示
   - “点击模型配置直接进入二级弹窗”已处理：已改为一级页面 + 右上角新建
   - “缺少编辑/删除/启动入口”已处理：一级页面提供铅笔编辑和垃圾桶删除；左侧主页面提供三角形启动
   - “误删配置风险”已处理：删除前增加确认对话框
-  - “API Key 明文持久化风险”仍保持规避：应用配置摘要不保存 API Key
+  - “API Key 展示泄露风险”已部分处理：配置文件保存真实 API Key 以支持直接启动，但 UI 输入、配置预览和列表展示默认掩码；后续如面向共享机器再升级安全存储
+
+**验收完成（2026-07-05）：**
+- 模型配置功能区已完成用户验收，当前效果满足预期。
+- 二级“新建/编辑模型配置”弹窗已改为可滚动内容区域，底部“配置 JSON 预览”可通过滚动访问。
+- 当前模型管理闭环：
+  - 初始状态不展示默认模型配置
+  - 用户保存配置后，左侧主页面显示模型名称和状态灯
+  - 一级配置页提供新建、编辑、删除
+  - 左侧主页面提供启动/停止双态按钮
+  - 启动写入 Claude Code `settings.json`，停止清理本工具管理的 Claude Code 环境变量
+  - API Key 可保存到本项目配置，但 UI、预览和列表默认掩码
+
+**回归修复完成（2026-07-06）：**
+- 已修复项目列表右键菜单“使用绑定 IDE 打开项目”点击后无明显响应的问题。
+- `launcher.py` 对 VS Code / Cursor / Windsurf 系 IDE 启动统一增加 `--new-window` 参数，避免 IDE 复用已有窗口导致用户误判为未启动。
+- `launcher.py` 支持通过 `cmd.exe /d /c` 正确启动 PATH 检测到的 `.cmd` / `.bat` IDE 包装器。
+- IDE 启动失败但文件资源管理器回退成功时视为成功；IDE 与回退都失败时，主界面弹出明确错误并更新状态栏。
+- 新增 `tests/test_launcher.py`，覆盖 `.cmd` 包装器启动、新窗口启动和 Explorer fallback 返回语义。
+- 验证结果：`python -m unittest discover -s tests` 通过（21 个测试）；`python -m compileall project_launcher tests` 通过。
+
+**后续计划对照：**
+- 当前后续开发方向与原定计划一致：Phase 3 已验收完成，下一阶段按计划进入 Phase 4：Skills 管理功能。
+- Phase 2 的 token 数据解析原计划排在 Phase 3 之前，但本轮开发已按用户优先级先完成模型配置管理；后续可继续进入 Phase 4，也可以先回补 Phase 2。
 
 **待完成：**
-- 设计 API Key 的安全存储策略；在策略确认前，不把 API Key 明文写入应用配置
-- 增加“应用到 Claude Code”动作，写入 `~/.claude/settings.json` 前必须备份并使用原子替换
+- 后续评估 Windows Credential Manager 或本机加密存储，替代当前个人工具 MVP 的本地配置保存方案
 - 增加“管理与测速”能力
-- 将当前“启动”动作从应用内状态切换升级为实际写入 Claude Code settings
+- 增加写入 Claude Code settings 后的连通性/模型可用性检测
 
 ---
 
@@ -220,7 +246,7 @@ API Key、请求地址、模型映射、默认兜底模型等细节只在模型�
 }
 ```
 
-第一版不在普通应用配置中明文持久化 API Key。API Key 在输入框和 JSON 预览中均默认掩码，后续需补安全存储策略。
+个人工具 MVP 阶段允许在本项目配置中保存真实 API Key，以保证模型配置保存后可直接启动；API Key 在输入框、JSON 预览、模型列表中均默认掩码。后续如果支持共享机器或更高安全等级，再升级为 Windows Credential Manager 或本机加密存储。
 
 应用到 Claude Code 时，写入 `~/.claude/settings.json` 中的 `env` 字段：
 
@@ -261,7 +287,7 @@ API Key、请求地址、模型映射、默认兜底模型等细节只在模型�
 |------|----------|
 | 没有模型配置 | 左侧显示“暂无模型配置”，不显示任何默认模型 |
 | 用户未填写必填字段 | 弹窗不关闭，显示明确错误 |
-| API Key 未有安全存储策略 | 不写入普通应用配置，仅在当前编辑流程中使用 |
+| API Key 本地保存 | 允许保存到本项目配置；UI 和预览必须掩码，日志不得输出 API Key |
 | settings.json 不存在 | 应用动作可创建配置文件，写入前提示并备份父目录状态 |
 | settings.json 格式异常 | 显示错误提示，不写入 |
 | 写入 settings.json 失败 | 显示错误对话框，保持 `is_active` 不变 |
@@ -771,7 +797,7 @@ class TokenChart(tk.Canvas):
 | **Phase 1** | 布局重构：左右分栏 + 右侧上下分割 + 左侧面板骨架 + 折线图骨架 + 项目列表 token 列 | 中 | ✅ 已完成 |
 | **Phase 1.5** | 风险底座修复：配置备份、覆盖回滚、日志路径统一、删除确认文案、安全测试 | 小 | ✅ 已完成 |
 | **Phase 2** | `token_scanner.py`：数据解析 + 缓存 + 路径映射 | 中 | 🔲 待开发 |
-| **Phase 3** | 模型配置管理：左侧入口、配置弹窗、JSON 预览、settings.json 写入 | 中 | 🟡 开发中 |
+| **Phase 3** | 模型配置管理：左侧入口、配置弹窗、JSON 预览、settings.json 写入 | 中 | ✅ 已验收 |
 | **Phase 4** | 左侧面板：Skills 管理功能 + `skill_manager.py` + 启用/禁用 | 中 | 🔲 待开发 |
 | **Phase 5** | 右上折线图：Canvas 手绘 + 日/周切换 + hover | 中 | 🔲 待开发 |
 | **Phase 6** | 项目列表 token 列 + 数据联通 | 小 | 🔲 待开发 |
@@ -786,10 +812,11 @@ class TokenChart(tk.Canvas):
 | JSONL 文件体积大（单文件可达 1MB+） | 扫描慢 | 缓存 + 增量更新 |
 | settings.json / 应用配置写入失败或被覆盖 | 配置损坏、用户配置丢失 | ✅ 已缓解：应用配置保存前创建 `.bak` 备份；后续 Claude Code settings 写入沿用同一策略 |
 | Skills 目录移动失败（权限/占用） | 启用/禁用不生效 | 操作前校验权限，失败时回弹 UI + 错误提示 |
-| API Key 泄露 | 凭据泄露、供应商账号风险 | 🟡 部分缓解：弹窗输入默认掩码、JSON 预览掩码；暂不持久化 API Key。后续需接入安全存储或明确加密/本机保存策略 |
+| API Key 泄露 | 凭据泄露、供应商账号风险 | 🟡 部分缓解：个人工具 MVP 阶段保存到本项目配置；弹窗输入、JSON 预览、列表展示均默认掩码，日志不得输出 API Key；后续可升级 Windows Credential Manager |
 | 拖放覆盖目录过程中复制失败 | 原目录被删除或半覆盖 | ✅ 已缓解：覆盖前移动旧目标到临时备份，失败时恢复，成功后清理备份 |
 | 删除项目/文件夹/文件误操作 | 用户数据不可恢复 | ✅ 已缓解：删除确认文案明确“直接从磁盘删除，不会进入回收站”，并要求确认路径 |
 | 崩溃日志路径分散 | 排障困难 | ✅ 已缓解：统一写入 `%TEMP%\ProjectLauncher\` |
+| 右键菜单“使用绑定 IDE 打开项目”无明显响应 | 用户无法判断项目是否已打开，影响核心启动体验 | ✅ 已缓解：VS Code / Cursor / Windsurf 系 IDE 默认使用 `--new-window`；兼容 `.cmd` / `.bat` 包装器；启动失败时提供弹窗和状态栏反馈 |
 | 路径编码歧义（路径名含 `--`） | 匹配失败 | 按最长路径优先匹配，记录日志 |
 | Canvas 折线图性能 | 重绘卡顿 | 仅在数据变化时重绘，限制最多 365 个数据点 |
 | 新布局对小屏幕不友好 | 显示拥挤 | PanedWindow 支持拖拽 + 折叠侧栏按钮 |

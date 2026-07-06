@@ -40,7 +40,12 @@ from ui.new_folder_dialog import NewFolderDialog
 from ui.model_profile_dialog import ModelProfileDialog
 from ui.model_profiles_page import ModelProfilesPage
 from ui.safety_messages import build_delete_confirmation_message
-from model_profiles import profile_from_summary, profile_to_summary, toggle_active_profile
+from claude_settings import (
+    apply_profile_to_settings_file,
+    get_default_claude_settings_path,
+    stop_profile_in_settings_file,
+)
+from model_profiles import profile_from_summary, profile_to_summary, set_active_profile, toggle_active_profile
 
 
 class MainWindow:
@@ -487,12 +492,25 @@ class MainWindow:
 
         success = launch(path, self.current_ide)
 
-        if not success and not os.path.isdir(path):
+        if success:
+            self.status_label.config(text=f"已打开: {path}")
+            return
+
+        if not os.path.isdir(path):
             show_error(
                 self.root, "路径不存在",
                 f"目录已不存在:\n{path}\n\n正在刷新列表...",
             )
             self.refresh()
+            return
+
+        ide_name = self.current_ide.display_name if self.current_ide else "绑定 IDE"
+        show_error(
+            self.root,
+            "无法打开项目",
+            f"无法使用 {ide_name} 打开项目，也无法回退到文件资源管理器:\n{path}",
+        )
+        self.status_label.config(text=f"打开失败: {path}")
 
     def _on_delete_project(self, project: ProjectInfo):
         """Handle 'Delete Project' action — remove the project directory."""
@@ -614,10 +632,34 @@ class MainWindow:
             return profiles
 
         was_active = bool(profiles[index].get("is_active", False))
-        toggle_active_profile(profiles, index)
         name = str(profiles[index].get("name", ""))
-        action = "已停止" if was_active else "已启动"
-        self.status_label.config(text=f"{action}模型配置: {name}")
+        settings_path = get_default_claude_settings_path()
+
+        try:
+            if was_active:
+                stop_profile_in_settings_file(settings_path)
+                toggle_active_profile(profiles, index)
+                self.status_label.config(text=f"已停止模型配置: {name}")
+            else:
+                profile = profile_from_summary(profiles[index])
+                if not profile.api_key.strip():
+                    messagebox.showerror(
+                        "无法启动模型配置",
+                        "该模型配置缺少 API Key，请先编辑模型配置并保存 API Key。",
+                        parent=parent,
+                    )
+                    return profiles
+                apply_profile_to_settings_file(settings_path, profile)
+                set_active_profile(profiles, index)
+                self.status_label.config(text=f"已启动模型配置: {name}")
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(
+                "无法写入 Claude Code 配置",
+                f"写入 {settings_path} 失败：\n{exc}",
+                parent=parent,
+            )
+            return profiles
+
         return self._save_model_profiles()
 
     def _open_settings(self):

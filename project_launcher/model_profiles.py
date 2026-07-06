@@ -141,6 +141,7 @@ def profile_to_summary(profile: ModelProfile) -> Dict[str, Any]:
     """Return a non-sensitive profile summary for app config storage."""
     return {
         "name": profile.name,
+        "api_key": profile.api_key,
         "base_url": profile.base_url,
         "api_format": profile.api_format,
         "auth_field": profile.auth_field,
@@ -173,7 +174,7 @@ def profile_from_summary(summary: Dict[str, Any]) -> ModelProfile:
     ]
     return ModelProfile(
         name=str(summary.get("name", "")),
-        api_key="",
+        api_key=str(summary.get("api_key", "")),
         base_url=str(summary.get("base_url", "")),
         api_format=str(summary.get("api_format", DEFAULT_API_FORMAT)),
         auth_field=str(summary.get("auth_field", DEFAULT_AUTH_FIELD)),

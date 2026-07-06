@@ -20,6 +20,16 @@ class IDEInfo:
     executable: str      # full path to .exe, empty for explorer
 
 
+VSCODE_FAMILY_EXECUTABLES = {
+    "code.exe",
+    "code.cmd",
+    "cursor.exe",
+    "cursor.cmd",
+    "windsurf.exe",
+    "windsurf.cmd",
+}
+
+
 # ── Generic IDE finder ──────────────────────────────────────────────────────
 
 def _find_ide_by_paths(
@@ -173,10 +183,17 @@ def launch(project_path: str, ide: IDEInfo) -> bool:
         except OSError:
             return False
 
+    command = [ide.executable, project_path]
+    executable_name = os.path.basename(ide.executable).lower()
+    if ide.key in {"vscode", "cursor", "windsurf"} or executable_name in VSCODE_FAMILY_EXECUTABLES:
+        command = [ide.executable, "--new-window", project_path]
+    if os.path.splitext(ide.executable)[1].lower() in {".bat", ".cmd"}:
+        command = ["cmd.exe", "/d", "/c", *command]
+
     # IDE launch via subprocess
     try:
         subprocess.Popen(
-            [ide.executable, project_path],
+            command,
             shell=False,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
@@ -187,4 +204,4 @@ def launch(project_path: str, ide: IDEInfo) -> bool:
             os.startfile(project_path)
         except OSError:
             return False
-        return False  # return False so caller knows fallback occurred
+        return True
